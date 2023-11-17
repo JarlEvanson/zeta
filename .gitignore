@@ -17,6 +17,4 @@ Cargo.lock
 .vscode/
 
 # These are common folders used for qemu testing
-outputs/
-OVMF/
-run_dir/
+testing/

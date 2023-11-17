@@ -12,6 +12,8 @@ repository.workspace = true
 [dependencies]
 uefi = { git = "ssh://git@github.com/JarlEvanson/uefi-rs.git", branch = "global_pointers" }
 uefi-macros = { git = "ssh://git@github.com/JarlEvanson/uefi-rs.git", branch = "global_pointers" }
+log.workspace = true
+sync.workspace = true
 
 [lints]
 workspace = true

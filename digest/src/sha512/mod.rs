@@ -1,10 +1,14 @@
+use core::fmt::Display;
+
 pub mod bits;
+pub mod bytes;
 
 /// Size of a SHA-512 digest in bytes.
 pub const DIGEST_BYTES: usize = 64;
 
 // Various internal constants.
-const BLOCK_SIZE: u16 = 1024;
+const BLOCK_SIZE_BITS: u16 = 1024;
+const BLOCK_SIZE_BYTES: u8 = 128;
 #[expect(
     clippy::unreadable_literal,
     reason = "round constants should never need to be read"
@@ -202,12 +206,23 @@ pub struct Digest {
 
 impl Digest {
     /// Takes a native-endian representation of a SHA512 digest.
+    #[must_use]
     pub const fn from_u64s(hash: [u64; 8]) -> Digest {
         Digest { digest: hash }
     }
 
     /// Returns a native-endian representation of a SHA512 digest.
+    #[must_use]
     pub const fn as_u64s(&self) -> [u64; DIGEST_BYTES / 8] {
         self.digest
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UpdateBitsError;
+
+impl Display for UpdateBitsError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "SHA-512 can only hash 2^128 - 1023 bits")
     }
 }

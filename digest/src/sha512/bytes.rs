@@ -7,14 +7,14 @@ use super::{
 pub struct Sha512 {
     /// Potential remainder from previous hashing operation.
     remainder: [u8; BLOCK_SIZE_BYTES as usize],
-    /// The number of remaining bits from previous hashing operations.
+
+    /// The number of remaining bytes from previous hashing operations.
     ///
-    /// Will always be less than 1024.
-    remainder_count: u16,
+    /// Will always be less than 128.
+    remainder_count: u8,
 
     /// Total number of bits hashed and in the remainder.
     total_bitcount: u128,
-
     /// The current state of the hash.
     hash_state: [u64; 8],
 }
@@ -32,10 +32,17 @@ impl Sha512 {
 
     /// # Errors
     /// Returns an error if the total number of bits hashed by the function would overflow a u128.
-    pub fn update(&mut self, message: &[u8], mut bit_count: u128) -> Result<(), UpdateBitsError> {
-        if bit_count == 0 {
+    pub fn update(&mut self, mut message: &[u8]) -> Result<(), UpdateBitsError> {
+        if message.is_empty() {
             return Ok(());
         }
+
+        let bit_count = u128::from(
+            u64::try_from(message.len())
+                .map_err(|_| UpdateBitsError)?
+                .checked_mul(8)
+                .ok_or(UpdateBitsError)?,
+        );
 
         if !self
             .total_bitcount
@@ -49,51 +56,26 @@ impl Sha512 {
 
         self.total_bitcount += bit_count;
 
-        let stored_bits = self.remainder_count & 0b111;
-        let needed_bits = 8 - stored_bits as u8;
+        if let Some(filled) = message.get(..usize::from(BLOCK_SIZE_BYTES - self.remainder_count)) {
+            self.remainder[usize::from(self.remainder_count)..].copy_from_slice(filled);
+            message = message.get(filled.len()..).unwrap_or(&[]);
 
-        let storage_mask = !((needed_bits & 8) ^ 8).wrapping_sub(1);
-
-        let mut storage = {
-            let start_byte = (self.remainder_count >> 3) as usize;
-
-            self.remainder_count -= stored_bits;
-
-            self.remainder[start_byte] & storage_mask
-        };
-
-        let mut byte_offset = 0;
-
-        while bit_count > 8 {
-            let current_write = &mut self.remainder[(self.remainder_count >> 3) as usize];
-
-            *current_write = storage | message[byte_offset] >> stored_bits;
-            storage = (message[byte_offset] << (needed_bits & 0b111)) & storage_mask;
-
-            self.remainder_count += 8;
-            bit_count -= 8;
-            byte_offset += 1;
-
-            if self.remainder_count == BLOCK_SIZE_BITS {
-                hash_block(&mut self.hash_state, &self.remainder);
-                self.remainder_count = 0;
-            }
+            hash_block(&mut self.hash_state, &self.remainder);
         }
 
-        let current_write = &mut self.remainder[(self.remainder_count >> 3) as usize];
-        *current_write = storage | message[byte_offset] >> stored_bits;
+        let mut chunks = message.array_chunks();
 
+        for chunk in chunks.by_ref() {
+            hash_block(&mut self.hash_state, chunk);
+        }
+
+        self.remainder[..chunks.remainder().len()].copy_from_slice(chunks.remainder());
         #[allow(
             clippy::cast_possible_truncation,
-            reason = "`bit_count` should always be less than or equal to 8 due to the above while loop"
+            reason = "`chunk.remainder` will always be less than 128 because array_chunks return chunks in 128 byte arrays"
         )]
         {
-            self.remainder_count += stored_bits + bit_count as u16;
-        }
-
-        if self.remainder_count == BLOCK_SIZE_BITS {
-            hash_block(&mut self.hash_state, &self.remainder);
-            self.remainder_count = 0;
+            self.remainder_count = chunks.remainder().len() as u8;
         }
 
         Ok(())
@@ -103,19 +85,18 @@ impl Sha512 {
     ///
     /// Resets the hasher to it's initial state.
     pub fn finalize(&mut self) -> Digest {
-        let one_byte = usize::from(self.remainder_count >> 3);
-        let one_bit = self.remainder_count & 0b111;
+        let one_byte = usize::from(self.remainder_count);
 
         // Set the 1 bit according to the algorithm, and zero any bits after the 1 bit.
-        let bit: u8 = 1 << (7 - one_bit);
+        let bit: u8 = 1 << 7;
 
         self.remainder[one_byte] = (self.remainder[one_byte] | bit) & !(bit - 1);
 
         let mut first_zero_byte = one_byte + 1;
 
-        let minumum_remaining = self.remainder_count + 1 + 128;
+        let minumum_remaining = self.remainder_count + 1 + 16;
 
-        if minumum_remaining > BLOCK_SIZE_BITS {
+        if minumum_remaining > BLOCK_SIZE_BYTES {
             self.remainder[first_zero_byte..].fill(0);
 
             hash_block(&mut self.hash_state, &self.remainder);
@@ -188,7 +169,7 @@ mod test {
 
         let msg = b"abc";
 
-        sha512.update(msg, msg.len() as u128 * 8).unwrap();
+        sha512.update(msg).unwrap();
 
         let hash = sha512.finalize();
 
@@ -212,7 +193,7 @@ mod test {
 
         let msg = b"";
 
-        sha512.update(msg, msg.len() as u128 * 8).unwrap();
+        sha512.update(msg).unwrap();
 
         let hash = sha512.finalize();
 
@@ -236,7 +217,7 @@ mod test {
 
         let msg = b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
 
-        sha512.update(msg, msg.len() as u128 * 8).unwrap();
+        sha512.update(msg).unwrap();
 
         let hash = sha512.finalize();
 
@@ -260,7 +241,7 @@ mod test {
 
         let msg = b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu";
 
-        sha512.update(msg, msg.len() as u128 * 8).unwrap();
+        sha512.update(msg).unwrap();
 
         let hash = sha512.finalize();
 
@@ -288,7 +269,7 @@ mod test {
 
         let msg = [b'a'; 1000000];
 
-        sha512.update(&msg, msg.len() as u128 * 8).unwrap();
+        sha512.update(&msg).unwrap();
 
         let hash = sha512.finalize();
 
@@ -313,7 +294,7 @@ mod test {
         let msg = b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmno";
 
         for _ in 0..16777216 {
-            sha512.update(msg, msg.len() as u128 * 8).unwrap();
+            sha512.update(msg).unwrap();
         }
 
         let hash = sha512.finalize();

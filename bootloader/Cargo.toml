@@ -1,0 +1,17 @@
+[package]
+name = "bootloader"
+version = "0.1.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+uefi = { git = "ssh://git@github.com/JarlEvanson/uefi-rs.git", branch = "global_pointers" }
+uefi-macros = { git = "ssh://git@github.com/JarlEvanson/uefi-rs.git", branch = "global_pointers" }
+
+[lints]
+workspace = true

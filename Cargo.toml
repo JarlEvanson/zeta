@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["bootloader", "digest"]
+members = ["bootloader", "digest", "sync"]
 
 
 [workspace.package]
@@ -12,6 +12,7 @@ repository = "https://github.com/JarlEvanson/zeta"
 
 [workspace.dependencies]
 log = "=0.4.20"
+sync = { path = "sync" }
 
 [workspace.lints.clippy]
 pedantic = "deny"

@@ -1,3 +1,5 @@
+//! Implementation of common no-std synchronization primitives.
+
 #![no_std]
 
 use core::{
@@ -7,19 +9,41 @@ use core::{
     sync::atomic::{AtomicU8, Ordering},
 };
 
+/// A mutual-exclusion primitive useful for protecting shared data.
+///
+/// This mutex implements a fast-path for uncontended locks, a slower path
+/// for periods of micro-contention, and a fallback to exponentional backoff
+/// during high contention.
 pub struct Mutex<T> {
+    /// Storage for the two mutex-control flags.
+    ///
+    /// LOCK: Indicates if the mutex is currently locked.
+    /// CONTENDED: Indicates if the mutex is currently contended.
     lock: AtomicU8,
+    /// The value protected by the mutex.
     value: UnsafeCell<T>,
 }
 
-unsafe impl<T: Send> Sync for Mutex<T> {}
+// SAFETY:
+// Mutexes are safe to send across thread boundaries as long as the underlying type
+// is safe to send across thread boundaries. Otherwise, using `mem::swap()` on a
+// mutex guard would allow for dropping or using T.
 unsafe impl<T: Send> Send for Mutex<T> {}
+// SAFETY:
+// Mutexes are safe to share across thread boundaries so long as the underlying type is
+// `Send`, otherwise one could send T across boundaries using `mem::swap()` on a mutex guard.
+unsafe impl<T: Send> Sync for Mutex<T> {}
 
 impl<T> Mutex<T> {
+    /// A bit flag representing if the mutex is locked.
     const IS_LOCKED: u8 = 0b01;
+    /// A bit flag representing if the mutex is contended.
     const IS_CONTENDED: u8 = 0b10;
+    /// The maximum number of increments which are done before a retry is attempted
+    /// when the fallback path occurs.
     const MAX_SLEEP: usize = 500_000_000;
 
+    /// Constructs a new unlocked mutex.
     pub const fn new(value: T) -> Mutex<T> {
         Mutex {
             lock: AtomicU8::new(0),
@@ -27,6 +51,7 @@ impl<T> Mutex<T> {
         }
     }
 
+    /// Acquires a mutex, spinning until acquisition succeeds.
     pub fn lock(&self) -> MutexGuard<T> {
         let current_state = self.lock.load(Ordering::Relaxed);
 
@@ -106,7 +131,13 @@ impl<T> Mutex<T> {
     }
 }
 
+/// A RAII implementation of a scoped lock of a mutex. When this structure is dropped,
+/// the lock will be unlocked.  
+///
+/// The data protected by the mutex can be access by its [`Deref`] and [`DerefMut`]
+/// implementations.
 pub struct MutexGuard<'lock, T> {
+    /// The mutex which this guard belongs to.
     lock: &'lock Mutex<T>,
 }
 

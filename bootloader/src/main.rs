@@ -5,10 +5,9 @@
 #![feature(lint_reasons, maybe_uninit_slice, strict_provenance)]
 
 use digest::sha512::Digest;
-use filesystem::{
-    acquire_boot_partition_root_directory, load_file, AcquireRootError, LoadFileError,
-};
+use filesystem::{acquire_boot_partition_root_directory, load_file, AcquireRootError};
 use uefi::{
+    boot::acquire_boot_handle,
     table::{Boot, SystemTable},
     CStr16, Handle, Status,
 };
@@ -34,11 +33,17 @@ static CONFIG_DIGEST: Digest = Digest::from_u64s([
     0xe699_4aad_8db6_4eb3,
 ]);
 
+/// The amount of time we stall before returning in the event of an error.
+const ERROR_STALL_TIME: usize = 10_000_000;
+
 #[uefi_macros::entry]
 fn main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     match logging::initialize() {
         Ok(()) => log::info!(target: "logging", "logging initialized"),
-        Err(_err) => return Status::ABORTED,
+        Err(_err) => {
+            acquire_boot_handle().stall(ERROR_STALL_TIME);
+            return Status::ABORTED;
+        }
     }
 
     let mut root_dir = match acquire_boot_partition_root_directory() {
@@ -55,6 +60,7 @@ fn main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
                     log::error!("failed to open the volume from which the bootloader was loaded");
                 }
             }
+            acquire_boot_handle().stall(ERROR_STALL_TIME);
             return Status::LOAD_ERROR;
         }
     };
@@ -62,33 +68,10 @@ fn main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     log::info!(target: "config", "loading configuration file");
     let result = match load_file(&mut root_dir, CONFIG_PATH, CONFIG_DIGEST) {
         Ok(bytes) => bytes,
-        Err(LoadFileError::AccessDenied) => {
-            log::error!("access to file was not allowed");
-            return Status::ACCESS_DENIED;
-        }
-        Err(LoadFileError::InvalidDigest) => {
-            log::error!("the digest of the configuration file was unexpected: verify authenticity and then embed its hash");
-            return Status::SECURITY_VIOLATION;
-        }
-        Err(LoadFileError::MediaError) => {
-            log::error!("a media error occurred");
-            return Status::ABORTED;
-        }
-        Err(LoadFileError::NotFile) => {
-            log::error!("item at \"{CONFIG_PATH}\" was not a file");
-            return Status::INVALID_PARAMETER;
-        }
-        Err(LoadFileError::NotFound) => {
-            log::error!("a config file must exist");
-            return Status::NOT_FOUND;
-        }
-        Err(LoadFileError::OutOfResources) => {
-            log::error!("out of resources");
-            return Status::OUT_OF_RESOURCES;
-        }
-        Err(LoadFileError::VolumeCorrupted) => {
-            log::error!("the volume was corrupted");
-            return Status::VOLUME_CORRUPTED;
+        Err(err) => {
+            log::error!("{}", err);
+            acquire_boot_handle().stall(ERROR_STALL_TIME);
+            return Into::<Status>::into(err);
         }
     };
 

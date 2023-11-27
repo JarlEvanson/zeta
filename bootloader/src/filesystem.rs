@@ -1,6 +1,6 @@
 //! Basic utilities related to loading and validating a file.
 
-use core::{mem::MaybeUninit, fmt::Display};
+use core::{fmt::Display, mem::MaybeUninit};
 
 use digest::sha512::{bytes::Sha512, Digest};
 use uefi::{
@@ -246,7 +246,23 @@ impl Display for LoadFileError {
             LoadFileError::NotFile => f.write_str("requested item was not a file"),
             LoadFileError::AccessDenied => f.write_str("access to the file was not allowed"),
             LoadFileError::VolumeCorrupted => f.write_str("the voluem was corrupted"),
-            LoadFileError::InvalidDigest => f.write_str("the digest of the file was unexpected: verify its authenticity"),
+            LoadFileError::InvalidDigest => {
+                f.write_str("the digest of the file was unexpected: verify its authenticity")
+            }
+        }
+    }
+}
+
+impl From<LoadFileError> for Status {
+    fn from(value: LoadFileError) -> Self {
+        match value {
+            LoadFileError::NotFound => Status::NOT_FOUND,
+            LoadFileError::MediaError => Status::ABORTED,
+            LoadFileError::OutOfResources => Status::OUT_OF_RESOURCES,
+            LoadFileError::NotFile => Status::INVALID_PARAMETER,
+            LoadFileError::AccessDenied => Status::ACCESS_DENIED,
+            LoadFileError::VolumeCorrupted => Status::VOLUME_CORRUPTED,
+            LoadFileError::InvalidDigest => Status::SECURITY_VIOLATION,
         }
     }
 }

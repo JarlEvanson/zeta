@@ -19,6 +19,7 @@ pub const PRECONFIG_GLOBAL: LevelFilter =
 /// Configuration of the [`SERIAL_FILTER`][f] before reading the configuration file.
 ///
 /// [f]: super::SERIAL_FILTER
+#[cfg(feature = "serial_logging")]
 pub const PRECONFIG_SERIAL: LevelFilter =
     match level_filter_from_str(match core::option_env!("PRECONFIG_SERIAL") {
         Some(env) => env,
@@ -33,6 +34,7 @@ pub const PRECONFIG_SERIAL: LevelFilter =
 /// Configuration of the [`FRAMEBUFFER_FILTER`][f] before reading the configuration file.
 ///
 /// [f]: super::FRAMEBUFFER_FILTER
+#[cfg(feature = "framebuffer_logging")]
 pub const PRECONFIG_FRAMEBUFFER: LevelFilter =
     match level_filter_from_str(match core::option_env!("PRECONFIG_FRAMEBUFFER") {
         Some(env) => env,

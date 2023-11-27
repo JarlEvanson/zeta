@@ -9,6 +9,11 @@ repository.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = ["serial_logging", "framebuffer_logging"]
+serial_logging = []
+framebuffer_logging = []
+
 [dependencies]
 uefi = { git = "ssh://git@github.com/JarlEvanson/uefi-rs.git", branch = "global_pointers" }
 uefi-macros = { git = "ssh://git@github.com/JarlEvanson/uefi-rs.git", branch = "global_pointers" }

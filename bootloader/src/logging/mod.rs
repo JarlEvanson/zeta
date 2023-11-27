@@ -5,17 +5,26 @@
 //! Before parsing the configuration file, logging is controlled by environment
 //! variables in the `pre_config` module.
 
-use core::{fmt::Write, sync::atomic::Ordering};
+use core::sync::atomic::Ordering;
+use filter::AtomicLevelFilter;
+use log::LevelFilter;
 
-use log::{Level, LevelFilter};
+// Imports used when any logging method is enabled.
+#[cfg(any(feature = "serial_logging", feature = "framebuffer_logging"))]
+use core::fmt::Write;
+#[cfg(any(feature = "serial_logging", feature = "framebuffer_logging"))]
+use log::Level;
+#[cfg(any(feature = "serial_logging", feature = "framebuffer_logging"))]
 use sync::Mutex;
+#[cfg(any(feature = "serial_logging", feature = "framebuffer_logging"))]
 use uefi::{
     boot::{get_handle_for_protocol, open_protocol_exclusive, ScopedProtocol},
-    proto::console::serial::Serial,
     Status,
 };
 
-use self::filter::AtomicLevelFilter;
+// Imports used for serial logging.
+#[cfg(feature = "serial_logging")]
+use uefi::proto::console::serial::Serial;
 
 mod filter;
 mod preconfig;
@@ -26,10 +35,12 @@ mod preconfig;
 static GLOBAL_FILTER: AtomicLevelFilter = AtomicLevelFilter::new(LevelFilter::Off);
 
 /// The state of the serial output for logging.
+#[cfg(feature = "serial_logging")]
 static mut SERIAL_STATE: Mutex<SerialState> = Mutex::new(SerialState::Uninitialized);
 /// The filter for all logs that go through the serial output.
 ///
 /// When initialized, set to the value of `PRE_CONFIG_SERIAL`.
+#[cfg(feature = "serial_logging")]
 static SERIAL_FILTER: AtomicLevelFilter = AtomicLevelFilter::new(LevelFilter::Off);
 
 /// The private representation of the logger.
@@ -45,12 +56,14 @@ impl log::Log for Logger {
             return;
         }
 
+        #[cfg(feature = "serial_logging")]
         log_serial(record);
     }
 
     fn flush(&self) {}
 }
 
+#[cfg(feature = "serial_logging")]
 /// Passes a log through to the serial output provided [`SERIAL_FILTER`] doesn't filter it out.
 fn log_serial(record: &log::Record) {
     if record.level() > SERIAL_FILTER.load(Ordering::Relaxed) {
@@ -67,6 +80,7 @@ fn log_serial(record: &log::Record) {
     }
 }
 
+#[cfg(any(feature = "serial_logging", feature = "framebuffer_logging"))]
 /// Generic implementation of the logging output.
 #[track_caller]
 fn log<W>(mut w: &mut W, record: &log::Record)
@@ -116,6 +130,7 @@ where
 /// # Errors
 /// If an error occurs while obtaining a serial logger, an error is returned relating to that.
 pub fn initialize() -> Result<(), SetupLoggingError> {
+    #[cfg(feature = "serial_logging")]
     match acquire_serial() {
         // SAFETY:
         // UEFI is single threaded, so `SerialState` is safe to access.
@@ -124,6 +139,7 @@ pub fn initialize() -> Result<(), SetupLoggingError> {
         },
         Err(err) => return Err(err),
     }
+    #[cfg(feature = "serial_logging")]
     SERIAL_FILTER.store(preconfig::PRECONFIG_SERIAL, Ordering::Relaxed);
 
     GLOBAL_FILTER.store(preconfig::PRECONFIG_GLOBAL, Ordering::Relaxed);
@@ -150,6 +166,7 @@ pub fn initialize() -> Result<(), SetupLoggingError> {
 /// [nf]: SetupLoggingError::NotFound
 /// [ac]: SetupLoggingError::AccessDenied
 /// [g]: SetupLoggingError::General
+#[cfg(feature = "serial_logging")]
 fn acquire_serial() -> Result<ScopedProtocol<'static, Serial>, SetupLoggingError> {
     let handle = match get_handle_for_protocol::<Serial>() {
         Ok(handle) => handle,
@@ -184,6 +201,7 @@ pub enum SetupLoggingError {
     General,
 }
 
+#[cfg(feature = "serial_logging")]
 /// The state of the serial logging facility.
 enum SerialState {
     /// Uninitialized.

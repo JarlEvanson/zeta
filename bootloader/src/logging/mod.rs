@@ -1,3 +1,10 @@
+//! Logging for the bootloader.
+//!
+//! Controls filtering and output of log messages.
+//!
+//! Before parsing the configuration file, logging is controlled by environment
+//! variables in the `pre_config` module.
+
 use core::{fmt::Write, sync::atomic::Ordering};
 
 use log::{Level, LevelFilter};
@@ -11,6 +18,7 @@ use uefi::{
 use self::filter::AtomicLevelFilter;
 
 mod filter;
+mod preconfig;
 
 /// The filter for all logs.
 ///
@@ -18,38 +26,13 @@ mod filter;
 static GLOBAL_FILTER: AtomicLevelFilter = AtomicLevelFilter::new(LevelFilter::Off);
 
 /// The state of the serial output for logging.
-static SERIAL_STATE: Mutex<SerialState> = Mutex::new(SerialState::Uninitialized);
+static mut SERIAL_STATE: Mutex<SerialState> = Mutex::new(SerialState::Uninitialized);
 /// The filter for all logs that go through the serial output.
 ///
 /// When initialized, set to the value of `PRE_CONFIG_SERIAL`.
 static SERIAL_FILTER: AtomicLevelFilter = AtomicLevelFilter::new(LevelFilter::Off);
 
-/// Initializes the logging framework, setting the filters to the corresponding [`LevelFilter`]
-/// specified by the environment variables.
-///
-/// The global filter takes on the value specified by `PRE_CONFIG_GLOBAL`.
-/// The serial filter takes on the value specified by `PRE_CONFIG_SERIAL`.
-///
-/// # Panics
-/// Panics if this function has already been called and returned successfully.
-///
-/// # Errors
-/// If an error occurs while obtaining a serial logger, an error is returned relating to that.
-pub fn initialize() -> Result<(), SetupLoggingError> {
-    match acquire_serial() {
-        Ok(serial) => *SERIAL_STATE.lock() = SerialState::Proto(serial),
-        Err(err) => return Err(err),
-    }
-    SERIAL_FILTER.store(pre_config::PRE_CONFIG_SERIAL, Ordering::Relaxed);
-
-    GLOBAL_FILTER.store(pre_config::PRE_CONFIG_GLOBAL, Ordering::Relaxed);
-
-    log::set_logger(&Logger).expect("logger can only be set once");
-    log::set_max_level(LevelFilter::Trace);
-
-    Ok(())
-}
-
+/// The private representation of the logger.
 struct Logger;
 
 impl log::Log for Logger {
@@ -58,18 +41,25 @@ impl log::Log for Logger {
     }
 
     fn log(&self, record: &log::Record) {
-        if record.level() <= GLOBAL_FILTER.load(Ordering::Relaxed)
-            && record.level() <= SERIAL_FILTER.load(Ordering::Relaxed)
-        {
-            log_serial(record);
+        if record.level() > GLOBAL_FILTER.load(Ordering::Relaxed) {
+            return;
         }
+
+        log_serial(record);
     }
 
     fn flush(&self) {}
 }
 
+/// Passes a log through to the serial output provided [`SERIAL_FILTER`] doesn't filter it out.
 fn log_serial(record: &log::Record) {
-    let mut guard = SERIAL_STATE.lock();
+    if record.level() > SERIAL_FILTER.load(Ordering::Relaxed) {
+        return;
+    }
+
+    // SAFETY:
+    // UEFI is single threaded, so `SerialState` is safe to access.
+    let mut guard = unsafe { SERIAL_STATE.lock() };
 
     match &mut *guard {
         SerialState::Uninitialized => {}
@@ -77,6 +67,7 @@ fn log_serial(record: &log::Record) {
     }
 }
 
+/// Generic implementation of the logging output.
 #[track_caller]
 fn log<W>(mut w: &mut W, record: &log::Record)
 where
@@ -113,6 +104,52 @@ where
     }
 }
 
+/// Initializes the logging framework, setting the filters to the corresponding [`LevelFilter`]
+/// specified by the environment variables.
+///
+/// The global filter takes on the value specified by `PRE_CONFIG_GLOBAL`.
+/// The serial filter takes on the value specified by `PRE_CONFIG_SERIAL`.
+///
+/// # Panics
+/// Panics if this function has already been called and returned successfully.
+///
+/// # Errors
+/// If an error occurs while obtaining a serial logger, an error is returned relating to that.
+pub fn initialize() -> Result<(), SetupLoggingError> {
+    match acquire_serial() {
+        // SAFETY:
+        // UEFI is single threaded, so `SerialState` is safe to access.
+        Ok(serial) => unsafe {
+            *SERIAL_STATE.lock() = SerialState::Proto(serial);
+        },
+        Err(err) => return Err(err),
+    }
+    SERIAL_FILTER.store(preconfig::PRECONFIG_SERIAL, Ordering::Relaxed);
+
+    GLOBAL_FILTER.store(preconfig::PRECONFIG_GLOBAL, Ordering::Relaxed);
+
+    log::set_logger(&Logger).expect("logger can only be set once");
+    log::set_max_level(LevelFilter::Trace);
+
+    Ok(())
+}
+
+/// Attempts to acquire a serial output.
+///
+/// # Errors
+/// - [`OutOfResources`][oof]
+///     - Returned when there is not enough resources to acquire a handle for a protocol.
+/// - [`NotFound`][nf]
+///     - Returned when no handle is found supporting the [`Serial`] protocol.
+/// - [`AccessDenied`][ac]
+///     - Returned when the attempt to open the [`Serial`] protocl failed.
+/// - [`General`][g]
+///     - Returned for all other errors.
+///
+/// [oof]: SetupLoggingError::OutOfResources
+/// [nf]: SetupLoggingError::NotFound
+/// [ac]: SetupLoggingError::AccessDenied
+/// [g]: SetupLoggingError::General
 fn acquire_serial() -> Result<ScopedProtocol<'static, Serial>, SetupLoggingError> {
     let handle = match get_handle_for_protocol::<Serial>() {
         Ok(handle) => handle,
@@ -135,86 +172,24 @@ fn acquire_serial() -> Result<ScopedProtocol<'static, Serial>, SetupLoggingError
     }
 }
 
+/// Various errors returned when setting up a logger.
 pub enum SetupLoggingError {
+    /// There wasn't enough resources to find a valid handle supporting the requested protocol.
     OutOfResources,
+    /// No handles support the requested protocol.
     NotFound,
+    /// Access to the requested protocol was denied.
     AccessDenied,
+    /// An unsupported error was returned.
     General,
 }
 
+/// The state of the serial logging facility.
 enum SerialState {
+    /// Uninitialized.
+    ///
+    /// Can occur both before setting up logging and after boot services are exited.
     Uninitialized,
+    /// Protocol setup.
     Proto(ScopedProtocol<'static, Serial>),
-}
-
-unsafe impl Send for SerialState {}
-
-mod pre_config {
-    use log::LevelFilter;
-
-    pub const PRE_CONFIG_GLOBAL: LevelFilter =
-        match level_filter_from_str(match core::option_env!("PRE_CONFIG_GLOBAL") {
-            Some(env) => env,
-            None => "error",
-        }) {
-            Some(filter) => filter,
-            None => panic!(
-                "`BOOT_GLOBAL` must be either `off`, `error`, `warn`, `info`, `debug`, or `trace`"
-            ),
-        };
-    pub const PRE_CONFIG_SERIAL: LevelFilter =
-        match level_filter_from_str(match core::option_env!("PRE_CONFIG_SERIAL") {
-            Some(env) => env,
-            None => "error",
-        }) {
-            Some(filter) => filter,
-            None => panic!(
-                "`BOOT_GLOBAL` must be either `off`, `error`, `warn`, `info`, `debug`, or `trace`"
-            ),
-        };
-    pub const PRE_CONFIG_FRAMEBUFFER: LevelFilter =
-        match level_filter_from_str(match core::option_env!("PRE_CONFIG_FRAMEBUFFER") {
-            Some(env) => env,
-            None => "error",
-        }) {
-            Some(filter) => filter,
-            None => panic!(
-                "`BOOT_GLOBAL` must be either `off`, `error`, `warn`, `info`, `debug`, or `trace`"
-            ),
-        };
-
-    const fn level_filter_from_str(filter: &str) -> Option<LevelFilter> {
-        const fn eq_ignore_ascii_case(lhs: &str, rhs: &str) -> bool {
-            if lhs.len() != rhs.len() {
-                return false;
-            }
-
-            let mut byte_pos = 0;
-
-            while byte_pos < lhs.len() {
-                if !lhs.as_bytes()[byte_pos].eq_ignore_ascii_case(&rhs.as_bytes()[byte_pos]) {
-                    return false;
-                }
-                byte_pos += 1;
-            }
-
-            true
-        }
-
-        if eq_ignore_ascii_case(filter, "off") {
-            Some(LevelFilter::Off)
-        } else if eq_ignore_ascii_case(filter, "error") {
-            Some(LevelFilter::Error)
-        } else if eq_ignore_ascii_case(filter, "warn") {
-            Some(LevelFilter::Warn)
-        } else if eq_ignore_ascii_case(filter, "info") {
-            Some(LevelFilter::Info)
-        } else if eq_ignore_ascii_case(filter, "debug") {
-            Some(LevelFilter::Debug)
-        } else if eq_ignore_ascii_case(filter, "trace") {
-            Some(LevelFilter::Trace)
-        } else {
-            None
-        }
-    }
 }

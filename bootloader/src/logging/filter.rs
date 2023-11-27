@@ -1,3 +1,5 @@
+//! Provides support for atomic modification of [`LevelFilter`]s.
+
 use core::sync::atomic::{AtomicU8, Ordering};
 
 use log::LevelFilter;
@@ -48,12 +50,18 @@ impl AtomicLevelFilter {
     /// [rs]: Ordering::Release
     /// [ar]: Ordering::AcqRel
     pub fn load(&self, order: Ordering) -> LevelFilter {
-        const OFF: u8 = LevelFilter::Off as u8;
-        const ERROR: u8 = LevelFilter::Error as u8;
-        const WARN: u8 = LevelFilter::Warn as u8;
-        const INFO: u8 = LevelFilter::Info as u8;
-        const DEBUG: u8 = LevelFilter::Debug as u8;
-        const TRACE: u8 = LevelFilter::Trace as u8;
+        /// The integer value of [`LevelFilter::Off`].
+        const OFF: u8 = to_u8(LevelFilter::Off);
+        /// The integer value of [`LevelFilter::Error`].
+        const ERROR: u8 = to_u8(LevelFilter::Error);
+        /// The integer value of [`LevelFilter::Warn`].
+        const WARN: u8 = to_u8(LevelFilter::Warn);
+        /// The integer value of [`LevelFilter::Info`].
+        const INFO: u8 = to_u8(LevelFilter::Info);
+        /// The integer value of [`LevelFilter::Debug`].
+        const DEBUG: u8 = to_u8(LevelFilter::Debug);
+        /// The integer value of [`LevelFilter::Trace`].
+        const TRACE: u8 = to_u8(LevelFilter::Trace);
 
         let value = self.0.load(order);
 
@@ -69,6 +77,7 @@ impl AtomicLevelFilter {
     }
 }
 
+/// Converts a [`LevelFilter`] to its integer representation.
 const fn to_u8(level_filter: LevelFilter) -> u8 {
     match level_filter {
         LevelFilter::Off => LevelFilter::Off as u8,

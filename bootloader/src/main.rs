@@ -1,6 +1,8 @@
+//! A bootloader for the zeta microkernel.
+
 #![no_std]
 #![no_main]
-#![feature(lint_reasons)]
+#![feature(lint_reasons, maybe_uninit_slice, strict_provenance)]
 
 use filesystem::{acquire_boot_partition_root_directory, AcquireRootError};
 use uefi::{
@@ -10,6 +12,7 @@ use uefi::{
 
 pub mod filesystem;
 pub mod logging;
+pub mod vec;
 
 #[uefi_macros::entry]
 fn main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {

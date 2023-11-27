@@ -1,9 +1,12 @@
+//! Implementation of a bit-based SHA-512 hasher.
+
 use core::{mem, ptr};
 
 use super::{
     hash_block, Digest, UpdateBitsError, BLOCK_SIZE_BITS, BLOCK_SIZE_BYTES, INITIAL_HASH_VALUES,
 };
 
+/// A bit-based SHA-512 hasher.
 pub struct Sha512 {
     /// Potential remainder from previous hashing operation.
     remainder: [u8; BLOCK_SIZE_BYTES as usize],
@@ -20,6 +23,7 @@ pub struct Sha512 {
 }
 
 impl Sha512 {
+    /// Constructs a new `Sha512` in its default state.
     #[must_use]
     pub fn new() -> Sha512 {
         Sha512 {
@@ -30,6 +34,10 @@ impl Sha512 {
         }
     }
 
+    /// Adds `bit_count` bits from `message` to the hash.
+    ///
+    /// Does not check if the bit representation is canonical.
+    ///  
     /// # Errors
     /// Returns an error if the total number of bits hashed by the function would overflow a u128.
     pub fn update(&mut self, message: &[u8], mut bit_count: u128) -> Result<(), UpdateBitsError> {
@@ -126,7 +134,8 @@ impl Sha512 {
         self.remainder[first_zero_byte..].fill(0);
 
         // Get the space for the 128 bit bit count.
-        let bitcount_bytes = &mut self.remainder[BLOCK_SIZE_BYTES as usize - 16..];
+        let bitcount_bytes =
+            &mut self.remainder[BLOCK_SIZE_BYTES as usize - 16..BLOCK_SIZE_BYTES as usize];
 
         #[cfg(target_endian = "little")]
         let bit_count = u128::from(((self.total_bitcount >> 64u64) as u64).to_be())
@@ -136,10 +145,15 @@ impl Sha512 {
         #[cfg(target_endian = "big")]
         let bit_count = self.total_bitcount;
 
+        // SAFETY:
+        // - [`u8`] has no alignment constraints, so all pointers are properly aligned
+        // - `bit_count` is an initialized [`u128`], and so is valid for reads of 16 bytes
+        // - `bitcount_bytes` is an initialized 16 byte slice, and so is valid for reads
+        // - `bitcount_bytes` and `bit_count` distinct items on the stack
         unsafe {
             core::ptr::copy_nonoverlapping(
                 ptr::addr_of!(bit_count).cast::<u8>(),
-                bitcount_bytes.as_mut_ptr().cast::<u8>(),
+                bitcount_bytes.as_mut_ptr(),
                 mem::size_of::<u128>(),
             );
         }

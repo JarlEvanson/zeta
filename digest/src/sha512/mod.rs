@@ -1,3 +1,5 @@
+//! Implementations of the SHA-512 algorithm.
+
 use core::fmt::Display;
 
 pub mod bits;
@@ -7,12 +9,15 @@ pub mod bytes;
 pub const DIGEST_BYTES: usize = 64;
 
 // Various internal constants.
+/// The number of bits in each hash block for SHA-512.
 const BLOCK_SIZE_BITS: u16 = 1024;
+/// The number of bytes in each hash block for SHA-512.
 const BLOCK_SIZE_BYTES: u8 = 128;
 #[expect(
     clippy::unreadable_literal,
     reason = "round constants should never need to be read"
 )]
+/// The round constants for SHA-512.
 const ROUND_CONSTANTS: [u64; 80] = [
     0x428a2f98d728ae22,
     0x7137449123ef65cd,
@@ -99,6 +104,7 @@ const ROUND_CONSTANTS: [u64; 80] = [
     clippy::unreadable_literal,
     reason = "initial hash values should never need to be read"
 )]
+/// The initial hash state for SHA-512.
 const INITIAL_HASH_VALUES: [u64; 8] = [
     0x6a09e667f3bcc908,
     0xbb67ae8584caa73b,
@@ -110,30 +116,37 @@ const INITIAL_HASH_VALUES: [u64; 8] = [
     0x5be0cd19137e2179,
 ];
 
+/// Function for SHA-512.
 const fn ch(x: u64, y: u64, z: u64) -> u64 {
     (x & y) ^ (!x & z)
 }
 
+/// Function for SHA-512.
 const fn maj(x: u64, y: u64, z: u64) -> u64 {
     (x & y) ^ (x & z) ^ (y & z)
 }
 
+/// Function for SHA-512.
 const fn csigma_0(x: u64) -> u64 {
     x.rotate_right(28) ^ x.rotate_right(34) ^ x.rotate_right(39)
 }
 
+/// Function for SHA-512.
 const fn csigma_1(x: u64) -> u64 {
     x.rotate_right(14) ^ x.rotate_right(18) ^ x.rotate_right(41)
 }
 
+/// Function for SHA-512.
 const fn lsigma_0(x: u64) -> u64 {
     x.rotate_right(1) ^ x.rotate_right(8) ^ (x >> 7)
 }
 
+/// Function for SHA-512.
 const fn lsigma_1(x: u64) -> u64 {
     x.rotate_right(19) ^ x.rotate_right(61) ^ (x >> 6)
 }
 
+/// Hashs a block of SHA-512.
 fn hash_block(hash_state: &mut [u64; 8], block: &[u8; 128]) {
     #![expect(
         clippy::many_single_char_names,
@@ -142,6 +155,12 @@ fn hash_block(hash_state: &mut [u64; 8], block: &[u8; 128]) {
 
     let mut working_buffer: [u64; 80] = [0; 80];
 
+    // SAFETY:
+    // - `block` is valid for reads of 128 bytes, since it is a 128 byte slice
+    // - `working_buffer` is valid for writes of 128 bytes, since it is 640 bytes
+    // - `block` and `working_buffer` are properly aligned, since `u8` needs no alignment
+    // - `block` comes from outside the function, whereas `working_buffer` is on the stack,
+    //      thus they cannot overlap
     unsafe {
         core::ptr::copy_nonoverlapping(
             block.as_ptr(),
@@ -198,6 +217,7 @@ fn hash_block(hash_state: &mut [u64; 8], block: &[u8; 128]) {
     hash_state[7] = h.wrapping_add(hash_state[7]);
 }
 
+/// A representation of a SHA-512 digest.
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
 pub struct Digest {
     /// Stored in 8 64-bit native-endian integers.
@@ -218,6 +238,10 @@ impl Digest {
     }
 }
 
+/// Returned when the number of bits hashed by a SHA-512 implementation
+/// hashs `2^128 - 1023` bits.
+///
+/// On any reasonably sized input, should never happen.
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UpdateBitsError;
 

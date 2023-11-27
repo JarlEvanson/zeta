@@ -14,6 +14,7 @@ uefi = { git = "ssh://git@github.com/JarlEvanson/uefi-rs.git", branch = "global_
 uefi-macros = { git = "ssh://git@github.com/JarlEvanson/uefi-rs.git", branch = "global_pointers" }
 log.workspace = true
 sync.workspace = true
+digest.workspace = true
 
 [lints]
 workspace = true

@@ -13,6 +13,7 @@ repository = "https://github.com/JarlEvanson/zeta"
 [workspace.dependencies]
 log = "=0.4.20"
 sync = { path = "sync" }
+digest = { path = "digest" }
 
 [workspace.lints.clippy]
 pedantic = "deny"

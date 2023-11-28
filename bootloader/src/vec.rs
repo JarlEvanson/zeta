@@ -2,6 +2,7 @@
 
 use core::{
     alloc::Layout,
+    fmt::Debug,
     marker::PhantomData,
     mem::{self, MaybeUninit},
     ptr::NonNull,
@@ -229,6 +230,22 @@ impl<T> Vec<T> {
         Ok(())
     }
 
+    pub fn push_within_capacity(&mut self, value: T) -> Result<(), T> {
+        let spare_capacity = self.spare_capacity_mut();
+
+        if spare_capacity.is_empty() {
+            return Err(value);
+        }
+
+        unsafe {
+            spare_capacity[0].write(value);
+        }
+
+        unsafe { self.set_len(self.len + 1) }
+
+        Ok(())
+    }
+
     /// Forces the length of the vector to `new_len`.
     ///
     /// This is a low-level operation that maintains none of the normal invariants
@@ -326,6 +343,22 @@ impl<T> Vec<T> {
     }
 }
 
+impl<T: Debug> Debug for Vec<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut darr = f.debug_list();
+
+        darr.entries(self.as_slice());
+
+        darr.finish()
+    }
+}
+
+impl<T> Default for Vec<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> Drop for Vec<T> {
     fn drop(&mut self) {
         let aligned_ptr = self.get_aligned_ptr();
@@ -381,6 +414,7 @@ enum Allocated<T> {
 }
 
 /// Various errors that can occur when calling [`Vec::with_capacity`].
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TryWithCapacityError {
     /// Error due to the computed capacity exceeding the collection's maximum
     /// (usually `isize::MAX` bytes)
@@ -393,6 +427,7 @@ pub enum TryWithCapacityError {
     },
 }
 /// Various errors that can occur when calling [`Vec::try_reserve`].
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TryReserveError {
     /// Error due to the computed capacity exceeding the collection's maximum
     /// (usually `isize::MAX` bytes)

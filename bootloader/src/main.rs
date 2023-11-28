@@ -1,8 +1,8 @@
 //! A bootloader for the zeta microkernel.
 
 #![no_std]
-#![no_main]
-#![feature(lint_reasons, maybe_uninit_slice, strict_provenance)]
+#![cfg_attr(not(test), no_main)]
+#![feature(lint_reasons, maybe_uninit_slice, strict_provenance, error_in_core)]
 
 use digest::sha512::Digest;
 use filesystem::{acquire_boot_partition_root_directory, load_file, AcquireRootError};
@@ -12,9 +12,12 @@ use uefi::{
     CStr16, Handle, Status,
 };
 
-pub mod filesystem;
-pub mod logging;
-pub mod vec;
+use crate::config::parse_configuration_file;
+
+mod config;
+mod filesystem;
+mod logging;
+mod vec;
 
 /// The path to the configuration file.
 const CONFIG_PATH: &CStr16 = uefi::cstr16!("zeta\\config.toml");
@@ -74,6 +77,22 @@ fn main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
             return Into::<Status>::into(err);
         }
     };
+
+    #[allow(unused)]
+    let Ok(config_string) = core::str::from_utf8(result.as_slice()) else {
+        log::error!("config file must be utf-8");
+        acquire_boot_handle().stall(ERROR_STALL_TIME);
+        return Status::INVALID_LANGUAGE;
+    };
+
+    log::info!(target: "config", "parsing configuration file");
+    parse_configuration_file(config_string).unwrap();
+
+    // let Ok(config) = Config::parse(config_string) else {
+    //     log::error!("error parsing config file: ");
+    //     acquire_boot_handle().stall(ERROR_STALL_TIME);
+    //     return Status::INVALID_LANGUAGE;
+    // };
 
     loop {
         core::hint::spin_loop();

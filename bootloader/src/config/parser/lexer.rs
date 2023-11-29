@@ -8,10 +8,7 @@ use core::str::Chars;
 
 use super::{
     is_newline, is_whitespace,
-    strings::{
-        BasicStringIterator, MultiLineBasicStringIterator, MultiplexedStringIterator,
-        StringIterator,
-    },
+    strings::{BasicStringIterator, MultiLineBasicStringIterator, StringIterator},
 };
 
 /// The character used to signal that the string has been exhausted.

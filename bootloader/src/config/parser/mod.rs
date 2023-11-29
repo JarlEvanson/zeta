@@ -10,7 +10,7 @@ use log::LevelFilter;
 use crate::{config::parser::lexer::Lexer, vec::Vec};
 
 use self::lexer::Token;
-use self::strings::{MultiplexedStringIterator, StringLike};
+use self::strings::StringLike;
 
 use super::Config;
 
@@ -18,7 +18,7 @@ mod impls;
 mod lexer;
 mod strings;
 
-use impls::*;
+use impls::ParseFromLexer;
 
 #[allow(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Default)]
@@ -97,14 +97,18 @@ impl<'config> ConfigParser<'config> {
                     }
                     parsed_key = true;
                 }
-                Token::Error => {
-                    log::error!("lexing error occured");
-                    todo!()
-                }
+                
                 Token::Eof => {
                     break;
                 }
-                token => todo!("unhandled token: {:?}", token),
+                Token::Error => {
+                    log::error!("lexing error occurred");
+                    todo!()
+                }
+                token => {
+                    log::error!("unexpected token: {token:?}");
+                    todo!()
+                }
             }
 
             if parsed_key {
@@ -126,6 +130,7 @@ impl<'config> ConfigParser<'config> {
         todo!()
     }
 
+    /// Parse a module declaration and sets up a new [`ModuleState`] to be modified.
     fn parse_module_header(&mut self) -> Result<(), ParseModuleHeaderError> {
         if self.toml_state.modules_declared.get().is_some() {
             return Err(ParseModuleHeaderError::AlreadyDeclared);
@@ -187,6 +192,7 @@ impl<'config> ConfigParser<'config> {
         Ok(())
     }
 
+    /// Switchs the table. Assumes `self.current_table` is [`Table::Global`].
     fn switch_table(&mut self) -> Result<(), SetTableError> {
         self.lexer.skip_whitespace();
 
@@ -206,7 +212,7 @@ impl<'config> ConfigParser<'config> {
             self.toml_state
                 .logging_declared
                 .set(())
-                .map_err(|_| SetTableError::AlreadyDeclared(Table::Logging))?;
+                .map_err(|()| SetTableError::AlreadyDeclared(Table::Logging))?;
             self.current_table = Table::Logging;
         } else if key.eq("kernel") {
             log::trace!("moving to the kernel table");
@@ -214,7 +220,7 @@ impl<'config> ConfigParser<'config> {
             self.toml_state
                 .kernel_declared
                 .set(())
-                .map_err(|_| SetTableError::AlreadyDeclared(Table::Kernel))?;
+                .map_err(|()| SetTableError::AlreadyDeclared(Table::Kernel))?;
             self.current_table = Table::Kernel;
         } else {
             log::error!("`{}` is not a valid table", key);
@@ -345,10 +351,12 @@ impl<'config> ConfigParser<'config> {
         Ok(())
     }
 
+    /// Function to control parsing of the kernel table.
     fn parse_kernel_key(&mut self, key: &dyn StringLike) -> Result<(), SetKeyError> {
         todo!()
     }
 
+    /// Function to control parsing of a module table.
     fn parse_module_key(&mut self, key: &dyn StringLike) -> Result<(), SetKeyError> {
         todo!()
     }
@@ -382,11 +390,19 @@ pub enum ParseModuleHeaderError<'config> {
     InvalidTable,
 }
 
+/// The four different types of tables.
+///
+/// 3 are unique, namely `Global`, `Logging`, and `Kernel`, and one is an array,
+/// namely `Modules`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Table {
+    /// The first, implicit table.
     Global,
+    /// The table controlling logging.
     Logging,
+    /// The table controlling the kernel.
     Kernel,
+    /// Tables controlling their respective module.
     Modules,
 }
 
@@ -401,10 +417,14 @@ impl Display for Table {
     }
 }
 
+/// Various errors that might occur when adjusting the current table we are working on.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SetTableError<'config> {
+enum SetTableError<'config> {
+    /// An unexpected token was run into.
     InvalidFormat(Token<'config>),
+    /// The requested table has already been declared.
     AlreadyDeclared(Table),
+    /// The requested table is not valid.
     InvalidTable,
 }
 
@@ -412,10 +432,10 @@ impl Display for SetTableError<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             SetTableError::InvalidFormat(token) => {
-                write!(f, "invalid table format: got {:?}", token)
+                write!(f, "invalid table format: got {token:?}")
             }
             SetTableError::AlreadyDeclared(table) => {
-                write!(f, "{} table has already been declared", table)
+                write!(f, "{table} table has already been declared")
             }
             SetTableError::InvalidTable => {
                 write!(f, "the requested table is invalid")
@@ -426,7 +446,8 @@ impl Display for SetTableError<'_> {
 
 impl Error for SetTableError<'_> {}
 
-pub fn set<'config, T: ParseFromLexer<'config>>(
+/// Parses a value, consuming the equals sign.
+fn set<'config, T: ParseFromLexer<'config>>(
     lexer: &mut Lexer<'config>,
     opt: &OnceCell<T>,
 ) -> Result<(), SetValueError<'config, T::Error>> {
@@ -447,6 +468,7 @@ pub fn set<'config, T: ParseFromLexer<'config>>(
     Ok(())
 }
 
+/// Various errors that might occur when setting a value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SetValueError<'config, E: Error> {
     /// The format of the key-value pair was invalid.
@@ -461,10 +483,10 @@ impl<E: Error> Display for SetValueError<'_, E> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             SetValueError::InvalidFormat(token) => {
-                write!(f, "invalid key-value format: got {:?}", token)
+                write!(f, "invalid key-value format: got {token:?}")
             }
             SetValueError::InvalidValue(err) => {
-                write!(f, "invalid value for associated key: {}", err)
+                write!(f, "invalid value for associated key: {err}")
             }
             SetValueError::AlreadySet => write!(f, "key has already been set"),
         }

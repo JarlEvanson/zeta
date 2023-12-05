@@ -1,5 +1,13 @@
 #![no_std]
-#![feature(lint_reasons, array_chunks, slice_as_chunks)]
+#![feature(
+    lint_reasons,
+    array_chunks,
+    slice_as_chunks,
+    maybe_uninit_array_assume_init,
+    const_maybe_uninit_array_assume_init,
+    const_mut_refs,
+    const_maybe_uninit_write
+)]
 //! Implementations of various cryptographic hashing algorithms.
 
 use core::mem::MaybeUninit;
@@ -7,21 +15,29 @@ use core::mem::MaybeUninit;
 pub mod sha512;
 
 /// Decodes a hex string into a byte string.
-fn decode_hex(data: &[u8], out: &mut [MaybeUninit<u8>]) -> bool {
+const fn decode_hex(data: &[u8], out: &mut [MaybeUninit<u8>]) -> bool {
     let output_len = data.len().div_ceil(2);
 
-    if out.len() < output_len {
+    if out.len() < output_len || (data.len() % 2 != 0) {
         return false;
     }
 
     let mut err = 0;
 
-    for (index, pair) in data.array_chunks::<2>().enumerate() {
-        err = ERROR_LUT[data[0] as usize] | ERROR_LUT[data[1] as usize];
+    let mut index = 0;
 
-        let value = VALUE_LUT[pair[0] as usize] << 4 | VALUE_LUT[pair[1] as usize];
+    loop {
+        if index + 1 >= data.len() {
+            break;
+        }
 
-        out[index].write(value);
+        err |= ERROR_LUT[data[index] as usize] | ERROR_LUT[data[index + 1] as usize];
+
+        let value = VALUE_LUT[data[index] as usize] << 4 | VALUE_LUT[data[index + 1] as usize];
+
+        out[index / 2].write(value);
+
+        index += 2;
     }
 
     err == 0

@@ -1,6 +1,8 @@
 //! Implementations of the SHA-512 algorithm.
 
-use core::fmt::Display;
+use core::{fmt::Display, mem::MaybeUninit};
+
+use crate::decode_hex;
 
 pub mod bits;
 pub mod bytes;
@@ -235,7 +237,7 @@ impl Digest {
         Some(Self::from_bytes_infallible(&bytes.as_chunks().0[0]))
     }
 
-    /// Constructs a [`Digest`] from a its representation as a byte array.
+    /// Constructs a [`Digest`] from its representation as a byte array.
     ///
     /// When starting from a slice rather than an array, [`from_bytes()`] can be used
     #[must_use]
@@ -256,6 +258,47 @@ impl Digest {
         digest.digest[7] = u64::from_be_bytes(windows[7]);
 
         digest
+    }
+
+    /// Constructs a [`Digest`] from its representation as a hex string.
+    #[must_use]
+    pub const fn from_str(hash: &str) -> Option<Digest> {
+        if hash.len() != 128 {
+            return None;
+        }
+
+        let mut output = [MaybeUninit::uninit(); DIGEST_BYTES];
+
+        let output = if decode_hex(hash.as_bytes(), &mut output) {
+            // SAFETY:
+            // `decode_hex` initializes `hash.as_bytes() / 2`, which equals 64.
+            unsafe { MaybeUninit::array_assume_init(output) }
+        } else {
+            return None;
+        };
+
+        Some(Self::from_bytes_infallible(&output))
+    }
+
+    /// Constructs a [`Digest`] from its representation as a hex string produced by `iter`.
+    pub fn from_chars<I: Iterator<Item = char>>(iter: I) -> Option<Digest> {
+        let mut chars = [0; 128];
+
+        let mut remaining: &mut [u8] = &mut chars;
+
+        for ch in iter {
+            if ch.len_utf8() > remaining.len() {
+                return None;
+            }
+
+            ch.encode_utf8(remaining);
+
+            remaining = &mut remaining[ch.len_utf8()..];
+        }
+
+        let created = core::str::from_utf8(&chars).ok()?;
+
+        Self::from_str(created)
     }
 
     /// Takes a native-endian representation of a SHA512 digest.
@@ -310,6 +353,8 @@ mod test {
         0xe6, 0x99, 0x4a, 0xad, 0x8d, 0xb6, 0x4e, 0xb3, // 8th u64
     ];
 
+    const DIGEST_1_STR: &str = "0340f948f096c1cbd1b73efda6f54a49c28b8bd9397aba285abf8552293edde64fc3763a0db9cad753bd1e1903a76d6518dede7936ae3896e6994aad8db64eb3";
+
     #[test]
     #[should_panic]
     fn from_bytes_too_long() {
@@ -324,5 +369,15 @@ mod test {
     #[test]
     fn from_bytes_infallible_1() {
         assert_eq!(Digest::from_bytes_infallible(&DIGEST_1_BYTES), DIGEST_1);
+    }
+
+    #[test]
+    fn from_str() {
+        assert_eq!(Digest::from_str(DIGEST_1_STR).unwrap(), DIGEST_1);
+    }
+
+    #[test]
+    fn from_chars() {
+        assert_eq!(Digest::from_chars(DIGEST_1_STR.chars()).unwrap(), DIGEST_1)
     }
 }

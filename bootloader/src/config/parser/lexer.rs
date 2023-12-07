@@ -93,13 +93,13 @@ impl<'str> Lexer<'str> {
     /// now and the last time [`reset_pos_within_token`][r] was called.
     ///
     /// [r]: Self::reset_pos_within_token
-    fn get_token_str(&self) -> &'str str {
+    fn token_str(&self) -> &'str str {
         &self.untokenized_str[..self.pos_within_token()]
     }
 
     /// Returns the string representing the remaining symbols that have not
     /// been tokenized yet.
-    fn get_untokenized_str(&self) -> &'str str {
+    fn untokenized_str(&self) -> &'str str {
         self.untokenized_str
     }
 
@@ -171,11 +171,11 @@ impl<'str> Lexer<'str> {
             ',' => Token::Comma,
             '"' => {
                 if self.first() == '"' && self.second() == '"' {
-                    MultiLineBasicStringIterator::parse_from_str(self.get_untokenized_str())
+                    MultiLineBasicStringIterator::parse_from_str(self.untokenized_str())
                         .inspect(|val| {
                             let _ = self.bump();
                             let _ = self.bump();
-                            for _ in 0..val.clone().count() {
+                            for _ in 0..val.underlying_chars().count() {
                                 let _ = self.bump();
                             }
                             let _ = self.bump();
@@ -184,9 +184,9 @@ impl<'str> Lexer<'str> {
                         })
                         .map_or(Token::Error, Token::MultiLineBasicString)
                 } else {
-                    BasicStringIterator::parse_from_str(self.get_untokenized_str())
+                    BasicStringIterator::parse_from_str(self.untokenized_str())
                         .inspect(|val| {
-                            for _ in 0..val.clone().count() {
+                            for _ in 0..val.underlying_chars().count() {
                                 let _ = self.bump();
                             }
                             let _ = self.bump();
@@ -210,7 +210,7 @@ impl<'str> Lexer<'str> {
                     }
 
                     let token = Token::MultiLineLiteralString(StringIterator::new(
-                        self.get_token_str().chars(),
+                        self.token_str().chars(),
                     ));
 
                     self.bump();
@@ -219,8 +219,7 @@ impl<'str> Lexer<'str> {
                 } else {
                     self.eat_while(|ch| ch != '\'');
 
-                    let token =
-                        Token::LiteralString(StringIterator::new(self.get_token_str().chars()));
+                    let token = Token::LiteralString(StringIterator::new(self.token_str().chars()));
 
                     self.bump();
 
@@ -230,7 +229,7 @@ impl<'str> Lexer<'str> {
             c if c.is_ascii_alphanumeric() || c == '_' || c == '-' => {
                 self.eat_while(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-');
 
-                Token::BareString(StringIterator::new(self.get_token_str().chars()))
+                Token::BareString(StringIterator::new(self.token_str().chars()))
             }
             '\u{9}' | '\u{20}' => {
                 self.eat_while(is_whitespace);
@@ -254,19 +253,38 @@ impl<'str> Lexer<'str> {
         self.next.clone()
     }
 
-    /// Advances the token stream if running `predicate` on the next [`Token`] in the token stream
-    /// returns true.
+    /// Advances the token stream if the next [`Token`] in the token stream
+    /// is equals to `token`.
     ///
-    /// Returns the next [`Token`] otherwise.
-    pub fn consume<F>(&mut self, predicate: F) -> Result<(), Token<'str>>
-    where
-        F: Fn(Token<'str>) -> bool,
-    {
-        if predicate(self.next.clone()) {
+    /// Returns the peeked next [`Token`] otherwise.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "`token` is generally used for trivially creatable items"
+    )]
+    pub fn consume(&mut self, token: Token) -> Result<(), Token<'str>> {
+        let peek = self.peek();
+        if peek == token {
             let _ = self.next();
             Ok(())
         } else {
-            Err(self.next.clone())
+            Err(peek)
+        }
+    }
+
+    /// Advances the token stream if running `predicate` on the next [`Token`] in the token stream
+    /// returns true.
+    ///
+    /// Returns the peeked next [`Token`] otherwise.
+    pub fn consume_by<F>(&mut self, predicate: F) -> Result<(), Token<'str>>
+    where
+        F: Fn(&Token<'str>) -> bool,
+    {
+        let peek = self.peek();
+        if predicate(&peek) {
+            let _ = self.next();
+            Ok(())
+        } else {
+            Err(peek)
         }
     }
 
@@ -312,16 +330,6 @@ impl<'str> Lexer<'str> {
     fn eat_until_line_end(&mut self) {
         let _ = self
             .eat_while_advanced::<_, core::convert::Infallible>(|s, _| Ok(!is_newline(s.as_str())));
-    }
-
-    /// If the next one or two characters make up a newline, then eat it.
-    fn eat_newline(&mut self) {
-        if self.first() == '\n' {
-            self.bump();
-        } else if self.first() == '\r' && self.second() == '\n' {
-            self.bump();
-            self.bump();
-        }
     }
 }
 

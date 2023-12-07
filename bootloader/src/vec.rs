@@ -148,10 +148,6 @@ impl<T> Vec<T> {
     ///
     /// [co]: TryReserveError::CapacityOverflow
     /// [ae]: TryReserveError::AllocError
-    #[expect(
-        clippy::missing_panics_doc,
-        reason = "allocated addresses must be capable of being aligned"
-    )]
     pub fn try_reserve(&mut self, additional_capacity: usize) -> Result<(), TryReserveError> {
         if additional_capacity == 0 {
             return Ok(());
@@ -230,6 +226,8 @@ impl<T> Vec<T> {
         Ok(())
     }
 
+    /// Attempts to insert `value` into the vector without exceeding the vector's capacity.
+    /// Returns `value` in the case of failure.
     pub fn push_within_capacity(&mut self, value: T) -> Result<(), T> {
         let spare_capacity = self.spare_capacity_mut();
 
@@ -237,10 +235,10 @@ impl<T> Vec<T> {
             return Err(value);
         }
 
-        unsafe {
-            spare_capacity[0].write(value);
-        }
+        spare_capacity[0].write(value);
 
+        // SAFETY:
+        // The next element has been initialized.
         unsafe { self.set_len(self.len + 1) }
 
         Ok(())

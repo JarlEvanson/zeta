@@ -3,6 +3,7 @@
 
 use core::{error::Error, fmt::Display};
 
+use digest::sha512::Digest;
 use log::LevelFilter;
 
 use super::{
@@ -57,18 +58,7 @@ impl<'config> ParseFromLexer<'config> for LevelFilter {
     fn parse(
         lexer: &mut Lexer<'config>,
     ) -> Result<Self, <LevelFilter as ParseFromLexer<'config>>::Error> {
-        let token = lexer.next();
-
-        let string = match token {
-            Token::BasicString(value) => MultiplexedStringIterator::Basic(value),
-            Token::MultiLineBasicString(value) => MultiplexedStringIterator::MultiLineBasic(value),
-            Token::LiteralString(value) | Token::MultiLineLiteralString(value) => {
-                MultiplexedStringIterator::Simple(value)
-            }
-            token => {
-                return Err(ParseFilterError::InvalidValueType { token });
-            }
-        };
+        let string = MultiplexedStringIterator::parse(lexer)?;
 
         let comparator: &dyn PartialEq<str> = &string;
 
@@ -93,26 +83,115 @@ impl<'config> ParseFromLexer<'config> for LevelFilter {
 /// The error returned when a [`LevelFilter`] fails to parse from the lexer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum ParseFilterError<'config> {
-    /// An unexpected token was encountered.
-    InvalidValueType {
-        /// The token that caused the parse to fail.
-        token: Token<'config>,
-    },
+    /// An error occurred while parsing a [`MultiplexedStringIterator`].
+    StringError(ParseMultiplexedStringError<'config>),
     /// The string was not a valid value.
     InvalidString(MultiplexedStringIterator<'config>),
+}
+
+impl<'config> From<ParseMultiplexedStringError<'config>> for ParseFilterError<'config> {
+    fn from(value: ParseMultiplexedStringError<'config>) -> Self {
+        Self::StringError(value)
+    }
 }
 
 impl Display for ParseFilterError<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            ParseFilterError::InvalidValueType { token } => {
-                write!(f, "expected a string, got {token:?}")
+            ParseFilterError::StringError(err) => {
+                write!(f, "an error occurred parsing the string: {err}")
             }
             ParseFilterError::InvalidString(str) => {
-                write!(f, "expected \"off\", \"error\", \"warn\", \"info\", \"debug\", or \"trace\", got {str}")
+                write!(f, "expected \"off\", \"error\", \"warn\", \"info\", \"debug\", or \"trace\", got {str:?}")
             }
         }
     }
 }
 
 impl Error for ParseFilterError<'_> {}
+
+impl<'config> ParseFromLexer<'config> for MultiplexedStringIterator<'config> {
+    type Error = ParseMultiplexedStringError<'config>;
+
+    fn parse(lexer: &mut Lexer<'config>) -> Result<Self, Self::Error> {
+        let token = lexer.next();
+
+        let string = match token {
+            Token::BasicString(value) => MultiplexedStringIterator::Basic(value),
+            Token::MultiLineBasicString(value) => MultiplexedStringIterator::MultiLineBasic(value),
+            Token::LiteralString(value) | Token::MultiLineLiteralString(value) => {
+                MultiplexedStringIterator::Simple(value)
+            }
+            token => {
+                return Err(ParseMultiplexedStringError::InvalidValueType { token });
+            }
+        };
+
+        Ok(string)
+    }
+}
+
+/// The error returned when a [`MultiplexedStringIterator`] fails to parse from the lexer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum ParseMultiplexedStringError<'config> {
+    /// An unexpected token was encountered.
+    InvalidValueType {
+        /// The token that caused the parse to fail.
+        token: Token<'config>,
+    },
+}
+
+impl Display for ParseMultiplexedStringError<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ParseMultiplexedStringError::InvalidValueType { token } => {
+                write!(f, "expected a string, got {token:?}")
+            }
+        }
+    }
+}
+
+impl Error for ParseMultiplexedStringError<'_> {}
+
+impl<'config> ParseFromLexer<'config> for Digest {
+    type Error = ParseDigestError<'config>;
+
+    fn parse(lexer: &mut Lexer<'config>) -> Result<Self, Self::Error> {
+        let hex_string = MultiplexedStringIterator::parse(lexer)?;
+
+        let digest = Digest::from_chars(hex_string.clone())
+            .ok_or(ParseDigestError::InvalidDigestFormat(hex_string))?;
+
+        Ok(digest)
+    }
+}
+
+/// The error returned when a [`Digest`] fails to parse from the lexer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum ParseDigestError<'config> {
+    /// An error occurred while parsing a [`MultiplexedStringIterator`].
+    StringError(ParseMultiplexedStringError<'config>),
+    /// The string was not a valid hex encoding of a SHA-512 hash.
+    InvalidDigestFormat(MultiplexedStringIterator<'config>),
+}
+
+impl<'config> From<ParseMultiplexedStringError<'config>> for ParseDigestError<'config> {
+    fn from(value: ParseMultiplexedStringError<'config>) -> Self {
+        Self::StringError(value)
+    }
+}
+
+impl Display for ParseDigestError<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ParseDigestError::StringError(err) => {
+                write!(f, "an error occurred parsing the string: {err}")
+            }
+            ParseDigestError::InvalidDigestFormat(str) => {
+                write!(f, "expected a hex string, got {str:?}")
+            }
+        }
+    }
+}
+
+impl Error for ParseDigestError<'_> {}

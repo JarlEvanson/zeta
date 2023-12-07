@@ -59,6 +59,11 @@ impl<'str> BasicStringIterator<'str> {
 
         None
     }
+
+    /// Returns an iterator over the underlying characters of the string.
+    pub fn underlying_chars(&self) -> Chars<'str> {
+        self.0.clone()
+    }
 }
 
 impl Iterator for BasicStringIterator<'_> {
@@ -237,6 +242,11 @@ impl<'str> MultiLineBasicStringIterator<'str> {
         }
 
         None
+    }
+
+    /// Returns an iterator over the underlying characters of the string.
+    pub fn underlying_chars(&self) -> Chars<'str> {
+        self.0.clone()
     }
 }
 

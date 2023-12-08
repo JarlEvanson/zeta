@@ -6,6 +6,7 @@ use core::fmt::Debug;
 
 use digest::sha512::Digest;
 use log::LevelFilter;
+use uefi::CStr16;
 
 use crate::vec::Vec;
 
@@ -23,8 +24,10 @@ pub struct Config {
     pub kernel: Kernel,
     /// Information regarding the known modules.
     pub modules: Vec<Module>,
-    /// Storage for all parsed strings.
+    /// Storage for all parsed UTF-8 strings.
     pub strings: StringStorage,
+    /// Storage for all parsed paths.
+    pub paths: PathStorage,
 }
 
 /// Potential settings for the global filter of log messages, the filter on all logs
@@ -44,7 +47,7 @@ pub struct LoggingFilters {
 #[derive(Debug)]
 pub struct Kernel {
     /// Path to kernel executable file.
-    pub path: StringHandle,
+    pub path: PathHandle,
     /// SHA-512 digest of kernel executable file.
     pub checksum: Digest,
     /// Arguments to be passed to the kernel.
@@ -55,7 +58,7 @@ pub struct Kernel {
 #[derive(Debug)]
 pub struct Module {
     /// Path to the module executable file.
-    pub path: StringHandle,
+    pub path: PathHandle,
     /// SHA-512 digest of the module executable file.
     pub checksum: Digest,
     /// Arguments to be passed to the module.
@@ -72,7 +75,7 @@ impl Debug for Config {
         dstruct.field_with("kernel", |f| {
             let mut dstruct = f.debug_struct("Kernel");
 
-            dstruct.field("path", &self.strings.lookup(self.kernel.path));
+            dstruct.field("path", &self.paths.lookup(self.kernel.path));
             dstruct.field("checksum", &self.kernel.checksum);
 
             dstruct.field_with("args", |f| {
@@ -95,7 +98,7 @@ impl Debug for Config {
                 dlist.entry_with(|f| {
                     let mut dstruct = f.debug_struct("Module");
 
-                    dstruct.field("path", &self.strings.lookup(module.path));
+                    dstruct.field("path", &self.paths.lookup(module.path));
                     dstruct.field("checksum", &module.checksum);
 
                     dstruct.field_with("args", |f| {
@@ -141,6 +144,42 @@ impl StringStorage {
         &mut self,
         iter: I,
     ) -> Result<StringHandle, ()> {
+        /// An iterator over the bytes of a utf-8 encoded codepoint.
+        struct CharByteIter {
+            /// The length of the codepoint.
+            len_utf8: usize,
+            /// The byte iterator.
+            iter: core::array::IntoIter<u8, 4>,
+        }
+
+        impl CharByteIter {
+            /// Creates a new [`CharByteIter`] from `c`.
+            fn new(c: char) -> CharByteIter {
+                let mut k = [0; 4];
+                c.encode_utf8(&mut k);
+
+                Self {
+                    len_utf8: c.len_utf8(),
+                    iter: k.into_iter(),
+                }
+            }
+        }
+
+        impl Iterator for CharByteIter {
+            type Item = u8;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                let bytes_consumed = 4 - self.iter.len();
+                self.iter.next().and_then(|bytes| {
+                    if bytes_consumed < self.len_utf8 {
+                        Some(bytes)
+                    } else {
+                        None
+                    }
+                })
+            }
+        }
+
         let byte_count = iter.clone().map(char::len_utf8).sum::<usize>();
 
         let start = self.storage.len();
@@ -178,38 +217,69 @@ pub struct StringHandle {
     len: usize,
 }
 
-/// An iterator over the bytes of a utf-8 encoded codepoint.
-struct CharByteIter {
-    /// The length of the codepoint.
-    len_utf8: usize,
-    /// The byte iterator.
-    iter: core::array::IntoIter<u8, 4>,
+/// A compact storage for [`CStr16`]s.
+pub struct PathStorage {
+    /// The underlying storage for the bytes making up the stored [`CStr16`]s.
+    storage: Vec<u16>,
 }
 
-impl CharByteIter {
-    /// Creates a new [`CharByteIter`] from `c`.
-    fn new(c: char) -> CharByteIter {
-        let mut k = [0; 4];
-        c.encode_utf8(&mut k);
-
+impl PathStorage {
+    /// Creates a new [`StringStorage`].
+    pub fn new() -> PathStorage {
         Self {
-            len_utf8: c.len_utf8(),
-            iter: k.into_iter(),
+            storage: Vec::new(),
         }
     }
+
+    /// Adds a [`CStr16`] produced from `iter` to the [`PathStorage`] and returns
+    /// its handle.
+    pub fn add_path_from_chars<I: Iterator<Item = char> + Clone>(
+        &mut self,
+        iter: I,
+    ) -> Result<PathHandle, ()> {
+        let u16_count = iter.clone().map(char::len_utf16).sum::<usize>() + 1;
+
+        let start = self.storage.len();
+
+        self.storage.try_reserve(u16_count).map_err(|_| ())?;
+
+        for c in iter {
+            let mut temp = [0; 2];
+
+            for value in c.encode_utf16(&mut temp).iter().copied() {
+                assert!(self.storage.push_within_capacity(value).is_ok());
+            }
+        }
+
+        assert!(self.storage.push_within_capacity(0).is_ok());
+
+        CStr16::from_u16_with_nul(&self.storage.as_slice()[start..]).map_err(|_| ())?;
+
+        let handle = PathHandle {
+            start,
+            len: u16_count,
+        };
+
+        Ok(handle)
+    }
+
+    /// Retrives the [`CStr16`] associated with `handle`.
+    ///
+    /// # Panics
+    /// Panics if `handle` does not beong to this [`PathStorage`].
+    pub fn lookup(&self, handle: PathHandle) -> &CStr16 {
+        CStr16::from_u16_with_nul(
+            &self.storage.as_slice()[handle.start..(handle.start + handle.len)],
+        )
+        .unwrap()
+    }
 }
 
-impl Iterator for CharByteIter {
-    type Item = u8;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let bytes_consumed = 4 - self.iter.len();
-        self.iter.next().and_then(|bytes| {
-            if bytes_consumed < self.len_utf8 {
-                Some(bytes)
-            } else {
-                None
-            }
-        })
-    }
+/// A handle to a [`CStr16`] stored in a [`PathStorage`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PathHandle {
+    /// The u16 index of the start of the [`CStr16`].
+    start: usize,
+    /// The length of the [`CStr16`].
+    len: usize,
 }

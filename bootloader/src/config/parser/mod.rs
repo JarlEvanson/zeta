@@ -14,7 +14,7 @@ use crate::{config::parser::lexer::Lexer, vec::Vec};
 use self::lexer::{Token, TokenKind};
 use self::strings::{MultiplexedStringIterator, StringLike};
 
-use super::Config;
+use super::{Config, PathStorage};
 
 mod impls;
 mod lexer;
@@ -74,40 +74,20 @@ struct ConfigParser<'config> {
 /// Parses [`Config`] from `toml_str`.
 pub fn parse_configuration_file(toml_str: &str) -> Result<Config, ParseConfigError> {
     let mut table = ConfigParser::parse_configuration_file(toml_str)?;
-    let mut storage = StringStorage::new();
+    let mut strings = StringStorage::new();
+    let mut paths = PathStorage::new();
 
     let randomize_memory = table.randomize_memory.get().copied().unwrap_or(false);
 
-    let logging = {
-        let global = table
-            .logging
-            .global
-            .get()
-            .copied()
-            .unwrap_or(DEFAULT_LOGGING_LEVEL);
-        let serial = table
-            .logging
-            .serial
-            .get()
-            .copied()
-            .unwrap_or(DEFAULT_LOGGING_LEVEL);
-        let framebuffer = table
-            .logging
-            .framebuffer
-            .get()
-            .copied()
-            .unwrap_or(DEFAULT_LOGGING_LEVEL);
-
-        LoggingFilters {
-            global,
-            serial,
-            framebuffer,
-        }
-    };
+    let logging = convert_logging(&table.logging);
 
     let kernel = {
         let path = if let Some(path) = table.kernel.path.get() {
-            storage.add_str_from_chars(path.clone()).unwrap()
+            if path.clone().count() == 0 {
+                return Err(ParseConfigError::UnsetMustSet);
+            }
+
+            paths.add_path_from_chars(path.clone()).unwrap()
         } else {
             log::error!("`kernel.path` must be set");
 
@@ -133,7 +113,7 @@ pub fn parse_configuration_file(toml_str: &str) -> Result<Config, ParseConfigErr
         let mut args = Vec::with_capacity(parsed_args.len()).unwrap();
 
         for arg in parsed_args.as_slice() {
-            args.push_within_capacity(storage.add_str_from_chars(arg.clone()).unwrap())
+            args.push_within_capacity(strings.add_str_from_chars(arg.clone()).unwrap())
                 .unwrap();
         }
 
@@ -148,7 +128,10 @@ pub fn parse_configuration_file(toml_str: &str) -> Result<Config, ParseConfigErr
 
     for parsed_module in table.modules.as_slice() {
         let path = if let Some(path) = parsed_module.path.get() {
-            storage.add_str_from_chars(path.clone()).unwrap()
+            if path.clone().count() == 0 {
+                return Err(ParseConfigError::UnsetMustSet);
+            }
+            paths.add_path_from_chars(path.clone()).unwrap()
         } else {
             log::error!("`module.path` must be set");
 
@@ -174,7 +157,7 @@ pub fn parse_configuration_file(toml_str: &str) -> Result<Config, ParseConfigErr
         let mut args = Vec::with_capacity(parsed_args.len()).unwrap();
 
         for arg in parsed_args.as_slice() {
-            args.push_within_capacity(storage.add_str_from_chars(arg.clone()).unwrap())
+            args.push_within_capacity(strings.add_str_from_chars(arg.clone()).unwrap())
                 .unwrap();
         }
 
@@ -192,10 +175,28 @@ pub fn parse_configuration_file(toml_str: &str) -> Result<Config, ParseConfigErr
         logging,
         kernel,
         modules,
-        strings: storage,
+        strings,
+        paths,
     };
 
     Ok(config)
+}
+
+/// Converts a [`LoggingState`] into a [`LoggingFilters`].
+fn convert_logging(state: &LoggingState) -> LoggingFilters {
+    let global = state.global.get().copied().unwrap_or(DEFAULT_LOGGING_LEVEL);
+    let serial = state.serial.get().copied().unwrap_or(DEFAULT_LOGGING_LEVEL);
+    let framebuffer = state
+        .framebuffer
+        .get()
+        .copied()
+        .unwrap_or(DEFAULT_LOGGING_LEVEL);
+
+    LoggingFilters {
+        global,
+        serial,
+        framebuffer,
+    }
 }
 
 impl<'config> ConfigParser<'config> {

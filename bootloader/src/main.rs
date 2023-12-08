@@ -20,7 +20,6 @@ use uefi::{
 
 use crate::{
     config::parse_configuration_file,
-    filesystem::load_file_convert,
     logging::{set_global_filter, set_serial_filter},
     vec::Vec,
 };
@@ -39,16 +38,12 @@ const CONFIG_PATH: &CStr16 = uefi::cstr16!("zeta\\config.toml");
 /// The current digest of the test configuration file.
 #[export_name = "digest"]
 #[link_section = ".config"]
-static CONFIG_DIGEST: Digest = Digest::from_u64s([
-    0xbb77_b007_a4c1_012f,
-    0x43fc_5bef_9875_f949,
-    0x5552_d95d_f7eb_600d,
-    0x5e63_74e9_08e4_fdd5,
-    0xf54d_257d_eb1a_acda,
-    0x0de5_fed2_f6c8_44cc,
-    0x68d5_a396_b334_856c,
-    0x979e_7884_fd7b_10ff,
-]);
+static CONFIG_DIGEST: Digest = match Digest::from_str(
+    "127659b5e77f07463e804d87c7d3d1649db56d1ef90cdd2e5c09993fc5222897334155603e8f2c68b8ec6cc16893137fbde979dae64d5fe9d8a3d9195a9252fb"
+) {
+    Some(digest) => digest,
+    None => panic!("invalid digest"),
+};
 
 /// The amount of time we stall before returning in the event of an error.
 const ERROR_STALL_TIME: usize = 10_000_000;
@@ -110,24 +105,43 @@ fn main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
     set_global_filter(config.logging.global);
     set_serial_filter(config.logging.serial);
 
-    let mut name_buffer = Vec::new();
-
-    let kernel_path = config.strings.lookup(config.kernel.path);
+    let kernel_path = config.paths.lookup(config.kernel.path);
     log::info!("loading kernel file from {}", kernel_path);
-    let kernel_bytes = match load_file_convert(
-        &mut root_dir,
-        kernel_path,
-        config.kernel.checksum,
-        &mut name_buffer,
-    ) {
+    let kernel_bytes = match load_file(&mut root_dir, kernel_path, config.kernel.checksum) {
         Ok(bytes) => bytes,
         Err(err) => {
             log::error!(target: "filesystem", "{err}");
             acquire_boot_handle().stall(ERROR_STALL_TIME);
-            return Status::INVALID_LANGUAGE;
+            return Into::<Status>::into(err);
         }
     };
     log::info!("kernel file loaded and verified");
+
+    let mut modules = match Vec::with_capacity(config.modules.len()) {
+        Ok(modules) => modules,
+        Err(err) => {
+            log::error!(target: "memory", "{err}");
+            acquire_boot_handle().stall(ERROR_STALL_TIME);
+            return Status::OUT_OF_RESOURCES;
+        }
+    };
+
+    for module in config.modules.as_slice() {
+        let module_bytes = match load_file(
+            &mut root_dir,
+            config.paths.lookup(module.path),
+            module.checksum,
+        ) {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                log::error!(target: "filesystem", "{err}");
+                acquire_boot_handle().stall(ERROR_STALL_TIME);
+                return Into::<Status>::into(err);
+            }
+        };
+        assert!(modules.push_within_capacity(module_bytes).is_ok());
+    }
+    log::info!(target: "filesystem", "all modules loaded");
 
     loop {
         core::hint::spin_loop();

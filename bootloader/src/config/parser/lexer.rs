@@ -21,9 +21,13 @@ pub const EOF_CHAR: char = '\0';
 /// and parsing the TOML file.
 pub struct Lexer<'str> {
     /// The untokenized string.
-    untokenized_str: &'str str,
-    /// An iterator containing the characters that have not been included as part of a token.
-    chars: Chars<'str>,
+    unflushed_str: &'str str,
+    /// An iterator whose difference between `untokenized_str` represents the current state of a token.
+    token_chars: Chars<'str>,
+    /// The current line.
+    current_line: usize,
+    /// The current number of codepoints since the last newline.
+    current_column: usize,
     /// The next token.
     next: Token<'str>,
 }
@@ -32,19 +36,20 @@ impl<'str> Lexer<'str> {
     /// Creates a new `Lexer` from `str`.
     pub fn new(str: &'str str) -> Lexer<'str> {
         let mut x = Lexer {
-            untokenized_str: str,
-            chars: str.chars(),
-            next: Token::Eof,
+            unflushed_str: str,
+            token_chars: str.chars(),
+            current_line: 1,
+            current_column: 0,
+            next: Token {
+                kind: TokenKind::Eof,
+                line: 0,
+                column: 0,
+            },
         };
 
         let _ = x.next();
 
         x
-    }
-
-    /// Returns the remaining character as a `str`.
-    fn as_str(&self) -> &'str str {
-        self.chars.as_str()
     }
 
     /// Peeks the next symbol from the input stream without consuming it.
@@ -54,8 +59,8 @@ impl<'str> Lexer<'str> {
     /// it should be checked with [`is_eof`][e] method.
     ///
     /// [e]: Self::is_eof
-    fn first(&self) -> char {
-        self.chars.clone().next().unwrap_or(EOF_CHAR)
+    pub(super) fn first(&self) -> char {
+        self.token_chars.clone().next().unwrap_or(EOF_CHAR)
     }
 
     /// Peeks the second symbol from the input stream without consuming it.
@@ -65,8 +70,8 @@ impl<'str> Lexer<'str> {
     /// it should be checked with [`is_eof`][e] method.
     ///
     /// [e]: Self::is_eof
-    fn second(&self) -> char {
-        let mut iter = self.chars.clone();
+    pub(super) fn second(&self) -> char {
+        let mut iter = self.token_chars.clone();
         iter.next();
         iter.next().unwrap_or(EOF_CHAR)
     }
@@ -80,42 +85,73 @@ impl<'str> Lexer<'str> {
     ///
     /// [e]: Self::is_eof
     #[allow(dead_code)]
-    fn nth(&self, index: usize) -> char {
-        self.chars.clone().nth(index).unwrap_or(EOF_CHAR)
+    pub(super) fn nth(&self, index: usize) -> char {
+        self.token_chars.clone().nth(index).unwrap_or(EOF_CHAR)
     }
 
     /// Checks if there is nothing more to consume.
-    fn is_eof(&self) -> bool {
-        self.chars.as_str().is_empty()
+    pub(super) fn is_eof(&self) -> bool {
+        self.token_chars.as_str().is_empty()
+    }
+
+    /// Returns the remaining untokenized characters as a `str`.
+    pub(super) fn untokenized_str(&self) -> &'str str {
+        self.token_chars.as_str()
     }
 
     /// Returns the string representing the symbols consumed between
-    /// now and the last time [`reset_pos_within_token`][r] was called.
+    /// now and the last time [`flush_token()`][r] was called.
     ///
-    /// [r]: Self::reset_pos_within_token
-    fn token_str(&self) -> &'str str {
-        &self.untokenized_str[..self.pos_within_token()]
+    /// [r]: Self::flush_token
+    pub(super) fn token_str(&self) -> &'str str {
+        &self.unflushed_str[..self.token_char_count()]
     }
 
-    /// Returns the string representing the remaining symbols that have not
-    /// been tokenized yet.
-    fn untokenized_str(&self) -> &'str str {
-        self.untokenized_str
-    }
-
-    /// Returns amount of already consumed symbols.
-    fn pos_within_token(&self) -> usize {
-        self.untokenized_str.len() - self.chars.as_str().len()
+    /// Returns the amount of characters consumed since the last flush.
+    pub(super) fn token_char_count(&self) -> usize {
+        self.unflushed_str.len() - self.token_chars.as_str().len()
     }
 
     /// Resets the number of bytes consumed to 0.
-    fn reset_pos_within_token(&mut self) {
-        self.untokenized_str = self.chars.as_str();
+    pub(super) fn flush_token(&mut self) {
+        self.unflushed_str = self.token_chars.as_str();
+    }
+
+    /// Resets the progress of the tokenizer to the last flush point.
+    ///
+    /// Must not be used between lines.
+    pub(super) fn reset_token(&mut self) {
+        self.current_column -= self.token_char_count();
+        self.token_chars = self.unflushed_str.chars();
+    }
+
+    /// The current number of lines we have parsed.
+    pub(super) fn current_line(&self) -> usize {
+        self.current_line
+    }
+
+    /// The number of characters since the last newline.
+    pub(super) fn current_column(&self) -> usize {
+        self.current_column
     }
 
     /// Advances the iterator, returning the next character.
-    fn bump(&mut self) -> Option<char> {
-        self.chars.next()
+    pub(super) fn bump(&mut self) -> Option<char> {
+        self.token_chars.next().inspect(|&c| {
+            if c == '\u{A}'
+                || c == '\u{B}'
+                || c == '\u{C}'
+                || c == '\u{D}'
+                || c == '\u{85}'
+                || c == '\u{2028}'
+                || c == '\u{2029}'
+            {
+                self.current_line += 1;
+                self.current_column = 0;
+            } else {
+                self.current_column += 1;
+            }
+        })
     }
 
     /// Advances the iterator while `predicate` returns `true` and the
@@ -123,7 +159,7 @@ impl<'str> Lexer<'str> {
     ///
     /// # Panics
     /// This function may panic if and only if `predicate` can panic.
-    fn eat_while<F>(&mut self, predicate: F)
+    pub(super) fn eat_while<F>(&mut self, predicate: F)
     where
         F: Fn(char) -> bool,
     {
@@ -137,7 +173,7 @@ impl<'str> Lexer<'str> {
     ///
     /// # Panics
     /// This function may panic if and only if `predicate` can panic.
-    fn eat_while_advanced<F, E>(&mut self, mut predicate: F) -> Result<(), E>
+    pub(super) fn eat_while_advanced<F, E>(&mut self, mut predicate: F) -> Result<(), E>
     where
         F: FnMut(&mut Self, char) -> Result<bool, E>,
     {
@@ -153,97 +189,110 @@ impl<'str> Lexer<'str> {
     /// Returns the next [`Token`] in the token stream.
     #[must_use]
     pub fn next(&mut self) -> Token<'str> {
+        let start_column = self.current_column();
+        let start_line = self.current_line();
+
         let Some(first_char) = self.bump() else {
-            return Token::Eof;
+            return Token {
+                kind: TokenKind::Eof,
+                line: start_line,
+                column: start_column,
+            };
         };
 
-        let token = match first_char {
-            '.' => Token::Dot,
-            '=' => Token::Equals,
-            '[' => Token::LeftSquareBracket,
-            ']' => Token::RightSquareBracket,
-            '{' => Token::LeftCurlyBracket,
-            '}' => Token::RightCurlyBracket,
-            '#' => {
-                self.eat_until_line_end();
-                Token::Comment
-            }
-            ',' => Token::Comma,
-            '"' => {
-                if self.first() == '"' && self.second() == '"' {
-                    MultiLineBasicStringIterator::parse_from_str(self.untokenized_str())
-                        .inspect(|val| {
-                            let _ = self.bump();
-                            let _ = self.bump();
-                            for _ in 0..val.underlying_chars().count() {
-                                let _ = self.bump();
-                            }
-                            let _ = self.bump();
-                            let _ = self.bump();
-                            let _ = self.bump();
-                        })
-                        .map_or(Token::Error, Token::MultiLineBasicString)
-                } else {
-                    BasicStringIterator::parse_from_str(self.untokenized_str())
-                        .inspect(|val| {
-                            for _ in 0..val.underlying_chars().count() {
-                                let _ = self.bump();
-                            }
-                            let _ = self.bump();
-                        })
-                        .map_or(Token::Error, Token::BasicString)
+        let token_kind = 'kind: {
+            match first_char {
+                '.' => TokenKind::Dot,
+                '=' => TokenKind::Equals,
+                '[' => TokenKind::LeftSquareBracket,
+                ']' => TokenKind::RightSquareBracket,
+                '{' => TokenKind::LeftCurlyBracket,
+                '}' => TokenKind::RightCurlyBracket,
+                '#' => {
+                    self.eat_until_line_end();
+                    TokenKind::Comment
                 }
-            }
-            '\'' => {
-                if self.first() == '\'' && self.second() == '\'' {
-                    let res = self.eat_while_advanced(|s, ch| {
-                        match s.second() {
-                            '\u{0}'..='\u{8}' | '\u{A}'..='\u{1F}' => return Err(()),
-                            _ => {}
+                ',' => TokenKind::Comma,
+                '"' => {
+                    self.reset_token();
+                    if self.nth(1) == '"' && self.nth(2) == '"' {
+                        MultiLineBasicStringIterator::parse(self)
+                            .map_or(TokenKind::LexingError, TokenKind::MultiLineBasicString)
+                    } else {
+                        BasicStringIterator::parse(self)
+                            .map_or(TokenKind::LexingError, TokenKind::BasicString)
+                    }
+                }
+                '\'' => {
+                    self.flush_token();
+                    if self.first() == '\'' && self.second() == '\'' {
+                        let res = self.eat_while_advanced(|s, ch| {
+                            match s.second() {
+                                '\u{0}'..='\u{8}' | '\u{A}'..='\u{1F}' => return Err(()),
+                                _ => {}
+                            }
+
+                            Ok(ch != '\'' && s.second() == '\'' && s.nth(2) == '\'')
+                        });
+
+                        if res.is_err() {
+                            break 'kind TokenKind::LexingError;
                         }
 
-                        Ok(ch != '\'' && s.second() == '\'' && s.nth(2) == '\'')
-                    });
+                        let token = TokenKind::MultiLineLiteralString(StringIterator::new(
+                            self.token_str().chars(),
+                        ));
 
-                    if res.is_err() {
-                        return Token::Error;
+                        self.bump();
+
+                        token
+                    } else {
+                        let res = self.eat_while_advanced(|s, ch| {
+                            match s.second() {
+                                '\u{0}'..='\u{8}' | '\u{A}'..='\u{1F}' => return Err(()),
+                                _ => {}
+                            }
+
+                            Ok(ch != '\'')
+                        });
+
+                        if res.is_err() {
+                            break 'kind TokenKind::LexingError;
+                        }
+
+                        let token =
+                            TokenKind::LiteralString(StringIterator::new(self.token_str().chars()));
+
+                        self.bump();
+
+                        token
                     }
-
-                    let token = Token::MultiLineLiteralString(StringIterator::new(
-                        self.token_str().chars(),
-                    ));
-
-                    self.bump();
-
-                    token
-                } else {
-                    self.eat_while(|ch| ch != '\'');
-
-                    let token = Token::LiteralString(StringIterator::new(self.token_str().chars()));
-
-                    self.bump();
-
-                    token
                 }
-            }
-            c if c.is_ascii_alphanumeric() || c == '_' || c == '-' => {
-                self.eat_while(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-');
+                c if c.is_ascii_alphanumeric() || c == '_' || c == '-' => {
+                    self.eat_while(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-');
 
-                Token::BareString(StringIterator::new(self.token_str().chars()))
+                    TokenKind::BareString(StringIterator::new(self.token_str().chars()))
+                }
+                '\u{9}' | '\u{20}' => {
+                    self.eat_while(is_whitespace);
+                    TokenKind::Whitespace
+                }
+                '\n' => TokenKind::Newline,
+                '\r' => match self.bump() {
+                    Some('\n') => TokenKind::Newline,
+                    _ => TokenKind::LexingError,
+                },
+                _ => TokenKind::LexingError,
             }
-            '\u{9}' | '\u{20}' => {
-                self.eat_while(is_whitespace);
-                Token::Whitespace
-            }
-            '\n' => Token::Newline,
-            '\r' => match self.bump() {
-                Some('\n') => Token::Newline,
-                _ => Token::Error,
-            },
-            _ => Token::Error,
         };
 
-        self.reset_pos_within_token();
+        self.flush_token();
+
+        let token = Token {
+            kind: token_kind,
+            line: start_line,
+            column: start_column,
+        };
 
         core::mem::replace(&mut self.next, token)
     }
@@ -261,26 +310,9 @@ impl<'str> Lexer<'str> {
         clippy::needless_pass_by_value,
         reason = "`token` is generally used for trivially creatable items"
     )]
-    pub fn consume(&mut self, token: Token) -> Result<(), Token<'str>> {
+    pub fn consume(&mut self, token_kind: TokenKind) -> Result<(), Token<'str>> {
         let peek = self.peek();
-        if peek == token {
-            let _ = self.next();
-            Ok(())
-        } else {
-            Err(peek)
-        }
-    }
-
-    /// Advances the token stream if running `predicate` on the next [`Token`] in the token stream
-    /// returns true.
-    ///
-    /// Returns the peeked next [`Token`] otherwise.
-    pub fn consume_by<F>(&mut self, predicate: F) -> Result<(), Token<'str>>
-    where
-        F: Fn(&Token<'str>) -> bool,
-    {
-        let peek = self.peek();
-        if predicate(&peek) {
+        if peek.kind == token_kind {
             let _ = self.next();
             Ok(())
         } else {
@@ -292,7 +324,7 @@ impl<'str> Lexer<'str> {
     ///
     /// TOML whitespace is defined as tabs (U+0009) and spaces (U+0020).
     pub fn skip_whitespace(&mut self) {
-        while self.peek() == Token::Whitespace {
+        while self.peek().kind == TokenKind::Whitespace {
             let _ = self.next();
         }
     }
@@ -303,7 +335,7 @@ impl<'str> Lexer<'str> {
     /// TOML newlines are defined as either U+000A or the sequence U+000D, U+000A.
     #[allow(dead_code)]
     fn skip_whitespace_newline(&mut self) {
-        while self.peek() == Token::Whitespace || self.peek() == Token::Newline {
+        while self.peek().kind == TokenKind::Whitespace || self.peek().kind == TokenKind::Newline {
             let _ = self.next();
         }
     }
@@ -316,9 +348,9 @@ impl<'str> Lexer<'str> {
     /// A TOML comment is defined as a '#' character and anything following it
     /// on the same line.
     pub fn skip_noncontent(&mut self) {
-        while self.peek() == Token::Whitespace
-            || self.peek() == Token::Newline
-            || self.peek() == Token::Comment
+        while self.peek().kind == TokenKind::Whitespace
+            || self.peek().kind == TokenKind::Newline
+            || self.peek().kind == TokenKind::Comment
         {
             let _ = self.next();
         }
@@ -328,14 +360,26 @@ impl<'str> Lexer<'str> {
     ///
     /// TOML newlines are defined as either U+000A or the sequence U+000D, U+000A.
     fn eat_until_line_end(&mut self) {
-        let _ = self
-            .eat_while_advanced::<_, core::convert::Infallible>(|s, _| Ok(!is_newline(s.as_str())));
+        let _ = self.eat_while_advanced::<_, core::convert::Infallible>(|s, _| {
+            Ok(!is_newline(s.untokenized_str()))
+        });
     }
 }
 
-/// All the possible tokens produced by lexing a toml file.
+/// A basic unit in TOML.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Token<'str> {
+pub struct Token<'str> {
+    /// The kind of the [`Token`].
+    pub kind: TokenKind<'str>,
+    /// The line it starts on.
+    pub line: usize,
+    /// The column it starts on.
+    pub column: usize,
+}
+
+/// All possible token types produced by lexing a toml file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TokenKind<'str> {
     /// A TOML bare key.
     BareString(StringIterator<'str>),
     /// A TOML basic string.
@@ -372,7 +416,7 @@ pub enum Token<'str> {
     RightCurlyBracket,
 
     /// An error that occurred while parsing a toml token.
-    Error,
+    LexingError,
     /// A token signalling the end of the toml file.
     Eof,
 }

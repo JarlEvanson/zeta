@@ -5,64 +5,104 @@ use core::{
     str::Chars,
 };
 
-use super::{is_newline, is_whitespace};
+use super::{is_newline, is_whitespace, lexer::Lexer};
 
 /// An iterator over the resolved characters of a TOML basic string.
 #[derive(Clone, Debug)]
 pub struct BasicStringIterator<'str>(Chars<'str>);
 
 impl<'str> BasicStringIterator<'str> {
-    /// Validates that `str` is a valid TOML basic string.
-    pub fn parse_from_str(str: &'str str) -> Option<BasicStringIterator<'str>> {
-        let mut chars = str.chars();
-
-        if !matches!(chars.next(), Some('"')) {
-            return None;
+    /// Parses a valid TOML basic string from `lexer`.
+    pub fn parse(
+        lexer: &mut Lexer<'str>,
+    ) -> Result<BasicStringIterator<'str>, ParseBasicStringError> {
+        /// The state of the finite machine.
+        enum State {
+            /// Last character was not a '\\'.
+            Normal,
+            /// Last character was a '\\'.
+            Escaped,
         }
+        if lexer.first() != '"' {
+            let err = ParseBasicStringError {
+                kind: ParseBasicStringErrorKind::MissingOpeningQuotationMark,
+                line: lexer.current_line(),
+                column: lexer.current_column(),
+            };
+            return Err(err);
+        }
+        let _ = lexer.bump();
 
-        while let Some(ch) = chars.next() {
-            if ('\u{0}'..='\u{8}').contains(&ch)
-                || ('\n'..='\u{1F}').contains(&ch)
-                || ch == '\u{7F}'
-            {
-                // Illegal control characters inside basic string.
-                return None;
-            } else if ch == '\\' {
-                // Escape characters.
-                match chars.next() {
-                    Some('b' | 't' | 'n' | 'f' | 'r' | '"' | '\\') => {}
-                    Some('u') => {
-                        let descriptor = chars.as_str().get(0..4)?;
+        lexer.flush_token();
 
-                        let value = u32::from_str_radix(descriptor, 16).ok()?;
+        let mut state = State::Normal;
 
-                        char::from_u32(value)?;
-                    }
-                    Some('U') => {
-                        let descriptor = chars.as_str().get(0..8)?;
+        while !lexer.is_eof() {
+            let c = lexer.first();
 
-                        let value = u32::from_str_radix(descriptor, 16).ok()?;
+            // Illegal control characters inside basic string.
+            if ('\u{0}'..='\u{8}').contains(&c) || ('\n'..='\u{1F}').contains(&c) || c == '\u{7F}' {
+                let err = ParseBasicStringError {
+                    kind: ParseBasicStringErrorKind::IllegalCharacter { c },
+                    line: lexer.current_line(),
+                    column: lexer.current_column(),
+                };
+                return Err(err);
+            }
 
-                        char::from_u32(value)?;
-                    }
-                    _ => return None,
+            match state {
+                State::Normal if c == '"' => {
+                    let basic_string = lexer.token_str();
+
+                    let _ = lexer.bump();
+
+                    return Ok(BasicStringIterator(basic_string.chars()));
                 }
-            } else if ch == '"' {
-                // End of string.
-                let k = str.strip_suffix(chars.as_str())?.strip_suffix('"')?.len();
+                State::Normal if c == '\\' => {
+                    state = State::Escaped;
+                    let _ = lexer.bump();
+                }
+                State::Escaped if matches!(c, 'b' | 't' | 'n' | 'f' | 'r' | '"' | '\\') => {
+                    let _ = lexer.bump();
 
-                let basic_string = &str[1..k];
+                    state = State::Normal;
+                }
+                State::Escaped if c == 'u' => {
+                    let _ = lexer.bump();
 
-                return Some(Self(basic_string.chars()));
+                    parse_unicode_scalar(lexer, 4)?;
+
+                    state = State::Normal;
+                }
+                State::Escaped if c == 'U' => {
+                    let _ = lexer.bump();
+
+                    parse_unicode_scalar(lexer, 8)?;
+
+                    state = State::Normal;
+                }
+                State::Escaped => {
+                    let err = ParseBasicStringError {
+                        kind: ParseBasicStringErrorKind::IllegalEscape { c },
+                        line: lexer.current_line(),
+                        column: lexer.current_column(),
+                    };
+
+                    return Err(err);
+                }
+                State::Normal => {
+                    let _ = lexer.bump();
+                }
             }
         }
 
-        None
-    }
+        let err = ParseBasicStringError {
+            kind: ParseBasicStringErrorKind::UnexpectedEof,
+            line: lexer.current_line(),
+            column: lexer.current_column(),
+        };
 
-    /// Returns an iterator over the underlying characters of the string.
-    pub fn underlying_chars(&self) -> Chars<'str> {
-        self.0.clone()
+        Err(err)
     }
 }
 
@@ -169,84 +209,168 @@ impl Display for BasicStringIterator<'_> {
     }
 }
 
+/// Various errors that can occur while parsing a [`BasicStringIterator`].
+///
+/// Includes data to help pinpoint the error's cause.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParseBasicStringError {
+    /// The type of the error.
+    pub kind: ParseBasicStringErrorKind,
+    /// The line on which it occurred.
+    pub line: usize,
+    /// The column in which it occurred.
+    pub column: usize,
+}
+
+impl From<ParseUnicodeScalarError> for ParseBasicStringError {
+    fn from(value: ParseUnicodeScalarError) -> Self {
+        let kind = match value.kind {
+            ParseUnicodeScalarErrorKind::IllegalCharacter { c } => {
+                ParseBasicStringErrorKind::IllegalCharacter { c }
+            }
+            ParseUnicodeScalarErrorKind::IllegalUnicodeScalar { value } => {
+                ParseBasicStringErrorKind::IllegalUnicodeScalar { value }
+            }
+            ParseUnicodeScalarErrorKind::UnexpectedEof => ParseBasicStringErrorKind::UnexpectedEof,
+        };
+
+        Self {
+            kind,
+            line: value.line,
+            column: value.column,
+        }
+    }
+}
+
+/// Various types of errors that can occur while parsing a [`BasicStringIterator`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ParseBasicStringErrorKind {
+    /// The opening quotation mark is missing.
+    MissingOpeningQuotationMark,
+    /// An illegal character was encountered while parsing.
+    IllegalCharacter {
+        /// The illegal character that was encountered.
+        c: char,
+    },
+    /// An invalid escape sequence was found inside the parsed string.
+    IllegalEscape {
+        /// The character that revealed the invalid escape sequence.
+        c: char,
+    },
+    /// The parsed `u32` scalar was not a valid unicode codepoint.
+    IllegalUnicodeScalar {
+        /// The `u32` scalar that was not a valid unicode codepoint.
+        value: u32,
+    },
+    /// The lexer reached `eof` unexpectedly.
+    UnexpectedEof,
+}
+
 /// An iterator over the resolved characters of a TOML multi-line basic string.
 #[derive(Clone, Debug)]
 pub struct MultiLineBasicStringIterator<'str>(Chars<'str>);
 
 impl<'str> MultiLineBasicStringIterator<'str> {
-    /// Validates that `str` is a valid TOML multi-line basic string.
-    pub fn parse_from_str(str: &'str str) -> Option<MultiLineBasicStringIterator<'str>> {
-        let mut chars = str.chars();
-
-        if !matches!(chars.next(), Some('"'))
-            || !matches!(chars.next(), Some('"'))
-            || !matches!(chars.next(), Some('"'))
-        {
-            return None;
+    /// Parses a valid TOML multi-line basic string from `lexer`.
+    pub fn parse(
+        lexer: &mut Lexer<'str>,
+    ) -> Result<MultiLineBasicStringIterator<'str>, ParseMultiLineBasicStringError> {
+        /// The state of the finite machine.
+        enum State {
+            /// Last character was not a '\\'.
+            Normal,
+            /// Last character was a '\\'.
+            Escaped,
         }
 
-        let underlying = chars.as_str();
+        for _ in 0..3 {
+            if lexer.first() != '"' {
+                let err = ParseMultiLineBasicStringError {
+                    kind: ParseMultiLineBasicStringErrorKind::MissingOpeningQuotationMark,
+                    line: lexer.current_line(),
+                    column: lexer.current_column(),
+                };
+                return Err(err);
+            }
+            let _ = lexer.bump();
+        }
 
-        while let Some(ch) = chars.next() {
-            if ('\u{0}'..='\u{8}').contains(&ch)
-                || ch == '\u{B}'
-                || ch <= '\u{C}'
-                || ('\u{E}'..='\u{1F}').contains(&ch)
-                || ch == '\u{7F}'
-            {
-                // Illegal control characters inside basic string.
-                return None;
-            } else if ch == '\\' {
-                // Escape characters.
-                match chars.next() {
-                    Some('b' | 't' | 'n' | 'f' | 'r' | '"' | '\\') => {}
-                    Some('u') => {
-                        let descriptor = chars.as_str().get(0..4)?;
+        let mut state = State::Normal;
 
-                        let value = u32::from_str_radix(descriptor, 16).ok()?;
+        while !lexer.is_eof() {
+            let c = lexer.first();
 
-                        char::from_u32(value)?;
-                    }
-                    Some('U') => {
-                        let descriptor = chars.as_str().get(0..8)?;
+            // Illegal control characters inside multi-line basic string.
+            if ('\u{0}'..='\u{8}').contains(&c) || ('\n'..='\u{1F}').contains(&c) || c == '\u{7F}' {
+                let err = ParseMultiLineBasicStringError {
+                    kind: ParseMultiLineBasicStringErrorKind::IllegalCharacter { c },
+                    line: lexer.current_line(),
+                    column: lexer.current_column(),
+                };
+                return Err(err);
+            }
 
-                        let value = u32::from_str_radix(descriptor, 16).ok()?;
+            match state {
+                State::Normal if c == '"' && lexer.second() == '"' && lexer.nth(2) == '"' => {
+                    let multi_line = lexer.token_str();
 
-                        char::from_u32(value)?;
-                    }
-                    Some(ch)
-                        if ch == '\n' || (ch == '\r' && chars.clone().next() == Some('\n')) => {}
-                    Some(ch)
-                        if is_whitespace(ch) && {
-                            while let Some(ch) = chars.clone().next() {
-                                if is_whitespace(ch) {
-                                    let _ = chars.next();
-                                } else {
-                                    break;
-                                }
-                            }
+                    let _ = lexer.bump();
+                    let _ = lexer.bump();
+                    let _ = lexer.bump();
 
-                            is_newline(chars.as_str())
-                        } => {}
-                    _ => return None,
+                    return Ok(MultiLineBasicStringIterator(multi_line.chars()));
                 }
-            } else if ch == '"' && chars.next() == Some('"') && chars.next() == Some('"') {
-                // End of string.
+                State::Normal if c == '\\' => {
+                    state = State::Escaped;
+                    let _ = lexer.bump();
+                }
+                State::Escaped if matches!(c, 'b' | 't' | 'n' | 'f' | 'r' | '"' | '\\') => {
+                    let _ = lexer.bump();
 
-                let underlying_str = underlying
-                    .strip_suffix(chars.as_str())?
-                    .strip_suffix("\"\"\"")?;
+                    state = State::Normal;
+                }
+                State::Escaped if c == 'u' => {
+                    let _ = lexer.bump();
 
-                return Some(Self(underlying_str.chars()));
+                    parse_unicode_scalar(lexer, 4)?;
+
+                    state = State::Normal;
+                }
+                State::Escaped if c == 'U' => {
+                    let _ = lexer.bump();
+
+                    parse_unicode_scalar(lexer, 8)?;
+
+                    state = State::Normal;
+                }
+                State::Escaped if is_whitespace(c) || is_newline(lexer.untokenized_str()) => {
+                    let _ = lexer.eat_while_advanced::<_, core::convert::Infallible>(|lexer, k| {
+                        Ok(is_whitespace(k) || is_newline(lexer.untokenized_str()))
+                    });
+
+                    state = State::Normal;
+                }
+                State::Escaped => {
+                    let err = ParseMultiLineBasicStringError {
+                        kind: ParseMultiLineBasicStringErrorKind::IllegalEscape { c },
+                        line: lexer.current_line(),
+                        column: lexer.current_column(),
+                    };
+
+                    return Err(err);
+                }
+                State::Normal => {
+                    let _ = lexer.bump();
+                }
             }
         }
+        let err = ParseMultiLineBasicStringError {
+            kind: ParseMultiLineBasicStringErrorKind::UnexpectedEof,
+            line: lexer.current_line(),
+            column: lexer.current_column(),
+        };
 
-        None
-    }
-
-    /// Returns an iterator over the underlying characters of the string.
-    pub fn underlying_chars(&self) -> Chars<'str> {
-        self.0.clone()
+        Err(err)
     }
 }
 
@@ -356,6 +480,63 @@ impl Display for MultiLineBasicStringIterator<'_> {
 
         Ok(())
     }
+}
+
+/// Various errors that can occur while parsing a [`MultiLineBasicStringIterator`].
+///
+/// Includes data to help pinpoint the error's cause.
+pub struct ParseMultiLineBasicStringError {
+    /// The type of the error.
+    pub kind: ParseMultiLineBasicStringErrorKind,
+    /// The line on which it occurred.
+    pub line: usize,
+    /// The column in which it occurred.
+    pub column: usize,
+}
+
+impl From<ParseUnicodeScalarError> for ParseMultiLineBasicStringError {
+    fn from(value: ParseUnicodeScalarError) -> Self {
+        let kind = match value.kind {
+            ParseUnicodeScalarErrorKind::IllegalCharacter { c } => {
+                ParseMultiLineBasicStringErrorKind::IllegalCharacter { c }
+            }
+            ParseUnicodeScalarErrorKind::IllegalUnicodeScalar { value } => {
+                ParseMultiLineBasicStringErrorKind::IllegalUnicodeScalar { value }
+            }
+            ParseUnicodeScalarErrorKind::UnexpectedEof => {
+                ParseMultiLineBasicStringErrorKind::UnexpectedEof
+            }
+        };
+
+        Self {
+            kind,
+            line: value.line,
+            column: value.column,
+        }
+    }
+}
+
+/// Various types of errors that can occur while parsing a [`MultiLineBasicStringIterator`].
+pub enum ParseMultiLineBasicStringErrorKind {
+    /// At least on of the three opening quotation marks is missing.
+    MissingOpeningQuotationMark,
+    /// An illegal character was encountered while parsing.
+    IllegalCharacter {
+        /// The illegal character that was encountered.
+        c: char,
+    },
+    /// An invalid escape sequence was found inside the parsed string.
+    IllegalEscape {
+        /// The character that revealed the invalid escape sequence.
+        c: char,
+    },
+    /// The parsed `u32` scalar was not a valid unicode codepoint.
+    IllegalUnicodeScalar {
+        /// The `u32` scalar that was not a valid unicode codepoint.
+        value: u32,
+    },
+    /// The lexer reached `eof` unexpectedly.
+    UnexpectedEof,
 }
 
 /// A wrapper around [`Chars`] that makes it comparable.
@@ -471,6 +652,69 @@ impl Display for MultiplexedStringIterator<'_> {
 pub(super) trait StringLike: PartialEq<str> + Display {}
 
 impl<T> StringLike for T where T: PartialEq<str> + Display {}
+
+/// Parses a unicode scalar of `count` hex digits.
+fn parse_unicode_scalar(lexer: &mut Lexer, count: usize) -> Result<char, ParseUnicodeScalarError> {
+    while !lexer.is_eof() {
+        if !lexer.first().is_ascii_hexdigit() {
+            let err = ParseUnicodeScalarError {
+                kind: ParseUnicodeScalarErrorKind::IllegalCharacter { c: lexer.first() },
+                line: lexer.current_line(),
+                column: lexer.current_column(),
+            };
+            // Illegal control characters inside basic string.
+            return Err(err);
+        }
+
+        let _ = lexer.bump();
+
+        if lexer.token_char_count() == count {
+            let value = u32::from_str_radix(lexer.token_str(), 16).unwrap();
+
+            char::from_u32(value).ok_or(ParseUnicodeScalarError {
+                kind: ParseUnicodeScalarErrorKind::IllegalUnicodeScalar { value },
+                line: lexer.current_line(),
+                column: lexer.current_column() - count,
+            })?;
+        }
+    }
+
+    let err = ParseUnicodeScalarError {
+        kind: ParseUnicodeScalarErrorKind::UnexpectedEof,
+        line: lexer.current_line(),
+        column: lexer.current_column(),
+    };
+
+    Err(err)
+}
+
+/// Various errors that can occur while parsing a unicode scalar value.
+///
+/// Includes data to help pinpoint the error's cause.
+pub struct ParseUnicodeScalarError {
+    /// The type of the error.
+    kind: ParseUnicodeScalarErrorKind,
+    /// The line on which it occurred.
+    line: usize,
+    /// The column in which it occurred.
+    column: usize,
+}
+
+/// Various error types that can occur when parsing a unicode scalar.
+enum ParseUnicodeScalarErrorKind {
+    /// An non-hex digit was encountered while parsing a unicode scalar.
+    IllegalCharacter {
+        /// The illegal character that was encountered.
+        c: char,
+    },
+    /// The parsed `u32` scalar was not a valid unicode codepoint.
+    IllegalUnicodeScalar {
+        /// The `u32` scalar that was not a valid unicode codepoint.
+        value: u32,
+    },
+    /// The lexer reached `eof` unexpectedly.
+    UnexpectedEof,
+}
 
 #[cfg(test)]
 mod test {

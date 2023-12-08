@@ -1,3 +1,5 @@
+use core::fmt::Debug;
+
 use digest::sha512::Digest;
 use log::LevelFilter;
 
@@ -8,6 +10,7 @@ mod parser;
 pub use parser::parse_configuration_file;
 
 /// A parsed TOML configuration file.
+#[derive(Debug)]
 pub struct Config {
     /// If true, then all unused memory will be randomized.
     pub randomize_memory: bool,
@@ -17,12 +20,14 @@ pub struct Config {
     pub kernel: Kernel,
     /// Information regarding the known modules.
     pub modules: Vec<Module>,
+    /// Storage for all parsed strings.
     pub strings: StringStorage,
 }
 
 /// Potential settings for the global filter of log messages, the filter on all logs
 /// outputted through the serial port, and the filter on all logs outputted onto the
 /// framebuffer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LoggingFilters {
     /// The setting of the global filter.
     pub global: LevelFilter,
@@ -33,25 +38,23 @@ pub struct LoggingFilters {
 }
 
 /// Information concerning the kernel file and modules to load.
+#[derive(Debug)]
 pub struct Kernel {
     /// Path to kernel executable file.
     pub path: StringHandle,
     /// SHA-512 digest of kernel executable file.
     pub checksum: Digest,
-    /// Arguments to be passed to the module.
+    /// Arguments to be passed to the kernel.
     pub args: Vec<StringHandle>,
-    /// Modules to be loaded with the kernel.
-    pub loaded_modules: Vec<StringHandle>,
 }
 
 /// Information concerning a module.
+#[derive(Debug)]
 pub struct Module {
-    /// Name of the module.
-    pub name: StringHandle,
     /// Path to the module executable file.
     pub path: StringHandle,
     /// SHA-512 digest of the module executable file.
-    pub digest: Digest,
+    pub checksum: Digest,
     /// Arguments to be passed to the module.
     pub args: Vec<StringHandle>,
 }
@@ -71,7 +74,7 @@ impl StringStorage {
         &mut self,
         iter: I,
     ) -> Result<StringHandle, ()> {
-        let byte_count = iter.clone().map(|c| c.len_utf8()).count();
+        let byte_count = iter.clone().map(char::len_utf8).sum::<usize>();
 
         let start = self.storage.len();
 
@@ -95,6 +98,13 @@ impl StringStorage {
     }
 }
 
+impl Debug for StringStorage {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("StringStorage")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StringHandle {
     start: usize,
     len: usize,

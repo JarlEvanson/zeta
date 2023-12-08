@@ -7,7 +7,7 @@ use digest::sha512::Digest;
 use log::LevelFilter;
 
 use super::{
-    lexer::{Lexer, Token},
+    lexer::{Lexer, Token, TokenKind},
     strings::{MultiplexedStringIterator, StringIterator},
 };
 
@@ -25,14 +25,19 @@ impl<'config> ParseFromLexer<'config> for bool {
     type Error = ParseBoolError<'config>;
 
     fn parse(lexer: &mut Lexer<'config>) -> Result<Self, Self::Error> {
-        match lexer.next() {
-            Token::BareString(value) if <StringIterator as PartialEq<str>>::eq(&value, "true") => {
+        let token = lexer.next();
+        match token.kind {
+            TokenKind::BareString(value)
+                if <StringIterator as PartialEq<str>>::eq(&value, "true") =>
+            {
                 Ok(true)
             }
-            Token::BareString(value) if <StringIterator as PartialEq<str>>::eq(&value, "false") => {
+            TokenKind::BareString(value)
+                if <StringIterator as PartialEq<str>>::eq(&value, "false") =>
+            {
                 Ok(false)
             }
-            token => Err(ParseBoolError { token }),
+            _ => Err(ParseBoolError { token }),
         }
     }
 }
@@ -51,6 +56,51 @@ impl Display for ParseBoolError<'_> {
 }
 
 impl Error for ParseBoolError<'_> {}
+
+impl<'config> ParseFromLexer<'config> for MultiplexedStringIterator<'config> {
+    type Error = ParseMultiplexedStringError<'config>;
+
+    fn parse(lexer: &mut Lexer<'config>) -> Result<Self, Self::Error> {
+        let token = lexer.next();
+
+        let string = match token.kind {
+            TokenKind::BasicString(value) => MultiplexedStringIterator::Basic(value),
+            TokenKind::MultiLineBasicString(value) => {
+                MultiplexedStringIterator::MultiLineBasic(value)
+            }
+            TokenKind::LiteralString(value) | TokenKind::MultiLineLiteralString(value) => {
+                MultiplexedStringIterator::Simple(value)
+            }
+            _ => {
+                return Err(ParseMultiplexedStringError::InvalidValueType { token });
+            }
+        };
+
+        Ok(string)
+    }
+}
+
+/// The error returned when a [`MultiplexedStringIterator`] fails to parse from the lexer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum ParseMultiplexedStringError<'config> {
+    /// An unexpected token was encountered.
+    InvalidValueType {
+        /// The token that caused the parse to fail.
+        token: Token<'config>,
+    },
+}
+
+impl Display for ParseMultiplexedStringError<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ParseMultiplexedStringError::InvalidValueType { token } => {
+                write!(f, "expected a string, got {token:?}")
+            }
+        }
+    }
+}
+
+impl Error for ParseMultiplexedStringError<'_> {}
 
 impl<'config> ParseFromLexer<'config> for LevelFilter {
     type Error = ParseFilterError<'config>;
@@ -109,49 +159,6 @@ impl Display for ParseFilterError<'_> {
 }
 
 impl Error for ParseFilterError<'_> {}
-
-impl<'config> ParseFromLexer<'config> for MultiplexedStringIterator<'config> {
-    type Error = ParseMultiplexedStringError<'config>;
-
-    fn parse(lexer: &mut Lexer<'config>) -> Result<Self, Self::Error> {
-        let token = lexer.next();
-
-        let string = match token {
-            Token::BasicString(value) => MultiplexedStringIterator::Basic(value),
-            Token::MultiLineBasicString(value) => MultiplexedStringIterator::MultiLineBasic(value),
-            Token::LiteralString(value) | Token::MultiLineLiteralString(value) => {
-                MultiplexedStringIterator::Simple(value)
-            }
-            token => {
-                return Err(ParseMultiplexedStringError::InvalidValueType { token });
-            }
-        };
-
-        Ok(string)
-    }
-}
-
-/// The error returned when a [`MultiplexedStringIterator`] fails to parse from the lexer.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum ParseMultiplexedStringError<'config> {
-    /// An unexpected token was encountered.
-    InvalidValueType {
-        /// The token that caused the parse to fail.
-        token: Token<'config>,
-    },
-}
-
-impl Display for ParseMultiplexedStringError<'_> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            ParseMultiplexedStringError::InvalidValueType { token } => {
-                write!(f, "expected a string, got {token:?}")
-            }
-        }
-    }
-}
-
-impl Error for ParseMultiplexedStringError<'_> {}
 
 impl<'config> ParseFromLexer<'config> for Digest {
     type Error = ParseDigestError<'config>;

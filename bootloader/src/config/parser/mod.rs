@@ -7,9 +7,11 @@ use core::{cell::OnceCell, fmt::Debug};
 use digest::sha512::Digest;
 use log::LevelFilter;
 
+use crate::config::{Kernel, LoggingFilters, Module, StringStorage};
+use crate::DEFAULT_LOGGING_LEVEL;
 use crate::{config::parser::lexer::Lexer, vec::Vec};
 
-use self::lexer::Token;
+use self::lexer::{Token, TokenKind};
 use self::strings::{MultiplexedStringIterator, StringLike};
 
 use super::Config;
@@ -27,42 +29,173 @@ struct ConfigState<'config> {
 
     // Logging table settings
     logging_declared: OnceCell<()>,
-
-    global_log_level: OnceCell<LevelFilter>,
-    framebuffer_log_level: OnceCell<LevelFilter>,
-    serial_log_level: OnceCell<LevelFilter>,
+    logging: LoggingState,
 
     // Kernel table settings
     kernel_declared: OnceCell<()>,
+    kernel: KernelState<'config>,
 
-    kernel_path: OnceCell<MultiplexedStringIterator<'config>>,
-    kernel_checksum: OnceCell<Digest>,
-    loaded_modules: OnceCell<Vec<MultiplexedStringIterator<'config>>>,
-    kernel_args: OnceCell<Vec<MultiplexedStringIterator<'config>>>,
     // Module table settings
     modules_declared: OnceCell<()>,
     modules: Vec<ModuleState<'config>>,
 }
 
 #[allow(clippy::missing_docs_in_private_items)]
+#[derive(Clone, Debug, Default)]
+struct LoggingState {
+    global: OnceCell<LevelFilter>,
+    framebuffer: OnceCell<LevelFilter>,
+    serial: OnceCell<LevelFilter>,
+}
+
+#[allow(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Default)]
-struct ModuleState<'config> {
-    name: OnceCell<MultiplexedStringIterator<'config>>,
+struct KernelState<'config> {
     path: OnceCell<MultiplexedStringIterator<'config>>,
     checksum: OnceCell<Digest>,
     args: OnceCell<Vec<MultiplexedStringIterator<'config>>>,
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
+#[derive(Debug, Default)]
+struct ModuleState<'config> {
+    path: OnceCell<MultiplexedStringIterator<'config>>,
+    checksum: OnceCell<Digest>,
+    args: OnceCell<Vec<MultiplexedStringIterator<'config>>>,
+}
+
+#[allow(clippy::missing_docs_in_private_items)]
 struct ConfigParser<'config> {
     current_table: Table,
     lexer: Lexer<'config>,
     toml_state: ConfigState<'config>,
 }
 
+/// Parses [`Config`] from `toml_str`.
 pub fn parse_configuration_file(toml_str: &str) -> Result<Config, ParseConfigError> {
-    let table = ConfigParser::parse_configuration_file(toml_str)?;
+    let mut table = ConfigParser::parse_configuration_file(toml_str)?;
+    let mut storage = StringStorage::new();
 
-    todo!()
+    let randomize_memory = table.randomize_memory.get().copied().unwrap_or(false);
+
+    let logging = {
+        let global = table
+            .logging
+            .global
+            .get()
+            .copied()
+            .unwrap_or(DEFAULT_LOGGING_LEVEL);
+        let serial = table
+            .logging
+            .serial
+            .get()
+            .copied()
+            .unwrap_or(DEFAULT_LOGGING_LEVEL);
+        let framebuffer = table
+            .logging
+            .framebuffer
+            .get()
+            .copied()
+            .unwrap_or(DEFAULT_LOGGING_LEVEL);
+
+        LoggingFilters {
+            global,
+            serial,
+            framebuffer,
+        }
+    };
+
+    let kernel = {
+        let path = if let Some(path) = table.kernel.path.get() {
+            storage.add_str_from_chars(path.clone()).unwrap()
+        } else {
+            log::error!("`kernel.path` must be set");
+
+            return Err(ParseConfigError::UnsetMustSet);
+        };
+
+        let Some(checksum) = table.kernel.checksum.get().copied() else {
+            log::error!("`kernel.path` must be set");
+
+            return Err(ParseConfigError::UnsetMustSet);
+        };
+
+        let parsed_args = if let Some(args) = table.kernel.args.get_mut() {
+            let mut tmp = Vec::new();
+
+            core::mem::swap(&mut tmp, args);
+
+            tmp
+        } else {
+            Vec::new()
+        };
+
+        let mut args = Vec::with_capacity(parsed_args.len()).unwrap();
+
+        for arg in parsed_args.as_slice() {
+            args.push_within_capacity(storage.add_str_from_chars(arg.clone()).unwrap())
+                .unwrap();
+        }
+
+        Kernel {
+            path,
+            checksum,
+            args,
+        }
+    };
+
+    let mut modules = Vec::with_capacity(table.modules.len()).unwrap();
+
+    for parsed_module in table.modules.as_slice() {
+        let path = if let Some(path) = parsed_module.path.get() {
+            storage.add_str_from_chars(path.clone()).unwrap()
+        } else {
+            log::error!("`module.path` must be set");
+
+            return Err(ParseConfigError::UnsetMustSet);
+        };
+
+        let Some(checksum) = parsed_module.checksum.get().copied() else {
+            log::error!("`module.checksum` must be set");
+
+            return Err(ParseConfigError::UnsetMustSet);
+        };
+
+        let parsed_args = if let Some(args) = table.kernel.args.get_mut() {
+            let mut tmp = Vec::new();
+
+            core::mem::swap(&mut tmp, args);
+
+            tmp
+        } else {
+            Vec::new()
+        };
+
+        let mut args = Vec::with_capacity(parsed_args.len()).unwrap();
+
+        for arg in parsed_args.as_slice() {
+            args.push_within_capacity(storage.add_str_from_chars(arg.clone()).unwrap())
+                .unwrap();
+        }
+
+        let module = Module {
+            path,
+            checksum,
+            args,
+        };
+
+        modules.push_within_capacity(module).unwrap();
+    }
+
+    let config = Config {
+        randomize_memory,
+        logging,
+        kernel,
+        modules,
+        strings: storage,
+    };
+
+    Ok(config)
 }
 
 impl<'config> ConfigParser<'config> {
@@ -77,18 +210,20 @@ impl<'config> ConfigParser<'config> {
         loop {
             let mut parsed_key = false;
 
-            match parser.lexer.next() {
-                Token::BareString(key) => {
+            let token = parser.lexer.next();
+
+            match token.kind {
+                TokenKind::BareString(key) => {
                     parser.parse_key(&key).unwrap();
                     parsed_key = true;
                 }
-                Token::BasicString(key) => {
+                TokenKind::BasicString(key) => {
                     parser.parse_key(&key).unwrap();
                     parsed_key = true;
                 }
-                Token::Comment | Token::Whitespace | Token::Newline => {}
-                Token::LeftSquareBracket => {
-                    if parser.lexer.consume(Token::LeftSquareBracket).is_ok() {
+                TokenKind::Comment | TokenKind::Whitespace | TokenKind::Newline => {}
+                TokenKind::LeftSquareBracket => {
+                    if parser.lexer.consume(TokenKind::LeftSquareBracket).is_ok() {
                         parser.parse_module_header().unwrap();
                     } else {
                         parser.switch_table().unwrap();
@@ -96,10 +231,10 @@ impl<'config> ConfigParser<'config> {
                     parsed_key = true;
                 }
 
-                Token::Eof => {
+                TokenKind::Eof => {
                     break;
                 }
-                Token::Error => {
+                TokenKind::LexingError => {
                     log::error!("lexing error occurred");
                     return Err(ParseConfigError::LexingError);
                 }
@@ -113,12 +248,11 @@ impl<'config> ConfigParser<'config> {
                 loop {
                     let token = parser.lexer.next();
 
-                    match token {
-                        Token::Newline | Token::Eof => {
-                            log::trace!("exiting");
+                    match token.kind {
+                        TokenKind::Newline | TokenKind::Eof => {
                             break;
                         }
-                        Token::Whitespace | Token::Comment => {}
+                        TokenKind::Whitespace | TokenKind::Comment => {}
                         token => panic!(
                             "there must be a newline or EOF after a key-value pair: {:?}",
                             token
@@ -141,11 +275,11 @@ impl<'config> ConfigParser<'config> {
 
         let key_token = self.lexer.next();
 
-        let key: &dyn StringLike = match key_token {
-            Token::BareString(ref key) => key,
-            Token::BasicString(ref key) => key,
-            token => {
-                return Err(ParseModuleHeaderError::InvalidFormat(token));
+        let key: &dyn StringLike = match key_token.kind {
+            TokenKind::BareString(ref key) => key,
+            TokenKind::BasicString(ref key) => key,
+            _ => {
+                return Err(ParseModuleHeaderError::InvalidFormat(key_token));
             }
         };
 
@@ -184,10 +318,10 @@ impl<'config> ConfigParser<'config> {
         self.lexer.skip_whitespace();
 
         self.lexer
-            .consume(Token::RightSquareBracket)
+            .consume(TokenKind::RightSquareBracket)
             .map_err(ParseModuleHeaderError::InvalidFormat)?;
         self.lexer
-            .consume(Token::RightSquareBracket)
+            .consume(TokenKind::RightSquareBracket)
             .map_err(ParseModuleHeaderError::InvalidFormat)?;
 
         Ok(())
@@ -199,11 +333,11 @@ impl<'config> ConfigParser<'config> {
 
         let key_token = self.lexer.next();
 
-        let key: &dyn StringLike = match key_token {
-            Token::BareString(ref key) => key,
-            Token::BasicString(ref key) => key,
-            token => {
-                return Err(SetTableError::InvalidFormat(token));
+        let key: &dyn StringLike = match key_token.kind {
+            TokenKind::BareString(ref key) => key,
+            TokenKind::BasicString(ref key) => key,
+            _ => {
+                return Err(SetTableError::InvalidFormat(key_token));
             }
         };
 
@@ -231,9 +365,9 @@ impl<'config> ConfigParser<'config> {
         self.lexer.skip_whitespace();
 
         self.lexer
-            .consume(Token::RightSquareBracket)
+            .consume(TokenKind::RightSquareBracket)
             .map_err(|token| {
-                if token == Token::Dot {
+                if token.kind == TokenKind::Dot {
                     SetTableError::InvalidTable
                 } else {
                     SetTableError::InvalidFormat(token)
@@ -265,42 +399,48 @@ impl<'config> ConfigParser<'config> {
         } else if key.eq("logging") {
             self.lexer.skip_whitespace();
 
-            match self.lexer.next() {
-                Token::Dot => {
+            let token = self.lexer.next();
+
+            match token.kind {
+                TokenKind::Dot => {
                     let _ = self.toml_state.logging_declared.set(());
 
                     self.lexer.skip_whitespace();
 
-                    match self.lexer.next() {
-                        Token::BareString(key) => self.parse_logging_key(&key),
-                        Token::BasicString(key) => self.parse_logging_key(&key),
-                        token => return Err(SetKeyError::InvalidFormat(token)),
+                    let token = self.lexer.next();
+
+                    match token.kind {
+                        TokenKind::BareString(key) => self.parse_logging_key(&key),
+                        TokenKind::BasicString(key) => self.parse_logging_key(&key),
+                        _ => return Err(SetKeyError::InvalidFormat(token)),
                     }?;
                 }
-                Token::Equals => {
+                TokenKind::Equals => {
                     todo!("implement inline tables");
                 }
-                token => return Err(SetKeyError::InvalidFormat(token)),
+                _ => return Err(SetKeyError::InvalidFormat(token)),
             }
         } else if key.eq("kernel") {
             self.lexer.skip_whitespace();
 
-            match self.lexer.next() {
-                Token::Dot => {
+            let token = self.lexer.next();
+
+            match token.kind {
+                TokenKind::Dot => {
                     let _ = self.toml_state.kernel_declared.set(());
 
-                    self.lexer.skip_whitespace();
+                    let token = self.lexer.next();
 
-                    match self.lexer.next() {
-                        Token::BareString(key) => self.parse_kernel_key(&key),
-                        Token::BasicString(key) => self.parse_kernel_key(&key),
-                        token => return Err(SetKeyError::InvalidFormat(token)),
+                    match token.kind {
+                        TokenKind::BareString(key) => self.parse_kernel_key(&key),
+                        TokenKind::BasicString(key) => self.parse_kernel_key(&key),
+                        _ => return Err(SetKeyError::InvalidFormat(token)),
                     }?;
                 }
-                Token::Equals => {
+                TokenKind::Equals => {
                     todo!("implement inline tables");
                 }
-                token => return Err(SetKeyError::InvalidFormat(token)),
+                _ => return Err(SetKeyError::InvalidFormat(token)),
             }
         } else if key.eq("modules") {
             self.lexer.skip_whitespace();
@@ -310,11 +450,13 @@ impl<'config> ConfigParser<'config> {
                 return Err(SetKeyError::AlreadySet);
             }
 
-            match self.lexer.next() {
-                Token::Equals => {
+            let token = self.lexer.next();
+
+            match token.kind {
+                TokenKind::Equals => {
                     todo!("implement arrays");
                 }
-                token => return Err(SetKeyError::InvalidFormat(token)),
+                _ => return Err(SetKeyError::InvalidFormat(token)),
             }
         } else {
             log::error!("`{}` is not a valid key for the global table", key);
@@ -329,21 +471,21 @@ impl<'config> ConfigParser<'config> {
         if key.eq("global") {
             log::trace!("setting `logging.global`");
 
-            if let Err(err) = set(&mut self.lexer, &self.toml_state.global_log_level) {
+            if let Err(err) = set(&mut self.lexer, &self.toml_state.logging.global) {
                 log::error!("error setting `logging.global`: {err}");
                 return Err(err.into());
             }
         } else if key.eq("serial") {
             log::trace!("setting `logging.serial`");
 
-            if let Err(err) = set(&mut self.lexer, &self.toml_state.serial_log_level) {
+            if let Err(err) = set(&mut self.lexer, &self.toml_state.logging.serial) {
                 log::error!("error setting `logging.serial`: {err}");
                 return Err(err.into());
             }
         } else if key.eq("framebuffer") {
             log::trace!("setting `logging.framebuffer`");
 
-            if let Err(err) = set(&mut self.lexer, &self.toml_state.framebuffer_log_level) {
+            if let Err(err) = set(&mut self.lexer, &self.toml_state.logging.framebuffer) {
                 log::error!("error setting `logging.framebuffer`: {err}");
                 return Err(err.into());
             }
@@ -360,26 +502,21 @@ impl<'config> ConfigParser<'config> {
         if key.eq("path") {
             log::trace!("setting `kernel.path`");
 
-            if let Err(err) = set(&mut self.lexer, &self.toml_state.kernel_path) {
+            if let Err(err) = set(&mut self.lexer, &self.toml_state.kernel.path) {
                 log::error!("error setting `kernel.path`: {err}");
                 return Err(err.into());
             }
         } else if key.eq("checksum") {
             log::trace!("setting `kernel.checksum`");
 
-            if let Err(err) = set(&mut self.lexer, &self.toml_state.kernel_checksum) {
+            if let Err(err) = set(&mut self.lexer, &self.toml_state.kernel.checksum) {
                 log::error!("error setting `kernel.checksum`: {err}");
-                return Err(err.into());
-            }
-        } else if key.eq("loaded_modules") {
-            log::trace!("setting `kernel.loaded_modules`");
-            if let Err(err) = set_array(&mut self.lexer, &self.toml_state.loaded_modules) {
-                log::error!("error setting `kernel.loaded_modules`: {err}");
                 return Err(err.into());
             }
         } else if key.eq("args") {
             log::trace!("setting `kernel.args`");
-            if let Err(err) = set_array(&mut self.lexer, &self.toml_state.kernel_args) {
+
+            if let Err(err) = set_array(&mut self.lexer, &self.toml_state.kernel.args) {
                 log::error!("error setting `kernel.args`: {err}");
                 return Err(err.into());
             }
@@ -395,14 +532,7 @@ impl<'config> ConfigParser<'config> {
     fn parse_module_key(&mut self, key: &dyn StringLike) -> Result<(), SetKeyError> {
         let module = self.toml_state.modules.as_slice_mut().last().unwrap();
 
-        if key.eq("name") {
-            log::trace!("setting `module.name`");
-
-            if let Err(err) = set(&mut self.lexer, &module.name) {
-                log::error!("error setting `module.name`: {err}");
-                return Err(err.into());
-            }
-        } else if key.eq("path") {
+        if key.eq("path") {
             log::trace!("setting `module.path`");
 
             if let Err(err) = set(&mut self.lexer, &module.path) {
@@ -435,6 +565,7 @@ impl<'config> ConfigParser<'config> {
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ParseConfigError {
     LexingError,
+    UnsetMustSet,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -525,7 +656,7 @@ fn set<'config, T: ParseFromLexer<'config>>(
 ) -> Result<(), SetValueError<'config, T::Error>> {
     lexer.skip_whitespace();
 
-    if let Err(token) = lexer.consume(Token::Equals) {
+    if let Err(token) = lexer.consume(TokenKind::Equals) {
         return Err(SetValueError::InvalidFormat(token));
     }
 
@@ -547,19 +678,19 @@ fn set_array<'config, T: ParseFromLexer<'config>>(
 ) -> Result<(), SetValueError<'config, T::Error>> {
     lexer.skip_whitespace();
 
-    if let Err(token) = lexer.consume(Token::Equals) {
+    if let Err(token) = lexer.consume(TokenKind::Equals) {
         return Err(SetValueError::InvalidFormat(token));
     }
 
     lexer.skip_whitespace();
 
-    if let Err(token) = lexer.consume(Token::LeftSquareBracket) {
+    if let Err(token) = lexer.consume(TokenKind::LeftSquareBracket) {
         return Err(SetValueError::InvalidFormat(token));
     }
 
     let mut vec = Vec::new();
 
-    while lexer.peek() != Token::RightSquareBracket {
+    while lexer.peek().kind != TokenKind::RightSquareBracket {
         lexer.skip_noncontent();
 
         let value = T::parse(lexer).map_err(SetValueError::InvalidValue)?;
@@ -580,14 +711,14 @@ fn set_array<'config, T: ParseFromLexer<'config>>(
 
         lexer.skip_noncontent();
 
-        if lexer.consume(Token::Comma).is_err() {
+        if lexer.consume(TokenKind::Comma).is_err() {
             break;
         }
 
         lexer.skip_noncontent();
     }
 
-    if let Err(token) = lexer.consume(Token::RightSquareBracket) {
+    if let Err(token) = lexer.consume(TokenKind::RightSquareBracket) {
         return Err(SetValueError::InvalidFormat(token));
     }
 

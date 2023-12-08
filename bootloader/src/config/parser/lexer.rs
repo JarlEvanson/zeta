@@ -52,6 +52,24 @@ impl<'str> Lexer<'str> {
         x
     }
 
+    /// Does not call `self.next()` for ease of testing.
+    ///
+    /// Calling [`peek()`] will return erroneous results.
+    #[cfg(test)]
+    pub(super) fn new_testing(str: &'str str) -> Lexer<'str> {
+        Lexer {
+            unflushed_str: str,
+            token_chars: str.chars(),
+            current_line: 1,
+            current_column: 0,
+            next: Token {
+                kind: TokenKind::Eof,
+                line: 0,
+                column: 0,
+            },
+        }
+    }
+
     /// Peeks the next symbol from the input stream without consuming it.
     ///
     /// If requested position doesn't exist, [`EOF_CHAR`] is returned.

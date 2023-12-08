@@ -20,7 +20,7 @@ use uefi::{
 
 use crate::{
     config::parse_configuration_file,
-    filesystem::convert_to_cstr16,
+    filesystem::load_file_convert,
     logging::{set_global_filter, set_serial_filter},
     vec::Vec,
 };
@@ -114,20 +114,17 @@ fn main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
 
     let kernel_path = config.strings.lookup(config.kernel.path);
     log::info!("loading kernel file from {}", kernel_path);
-    let kernel_path = match convert_to_cstr16(kernel_path, &mut name_buffer) {
-        Ok(path) => path,
-        Err(err) => {
-            log::error!(target: "config", "error converting kernel path to USC-2: {}", err);
-            acquire_boot_handle().stall(ERROR_STALL_TIME);
-            return Status::INVALID_LANGUAGE;
-        }
-    };
-    let result = match load_file(&mut root_dir, kernel_path, CONFIG_DIGEST) {
+    let kernel_bytes = match load_file_convert(
+        &mut root_dir,
+        kernel_path,
+        config.kernel.checksum,
+        &mut name_buffer,
+    ) {
         Ok(bytes) => bytes,
         Err(err) => {
-            log::error!("{}", err);
+            log::error!(target: "filesystem", "{err}");
             acquire_boot_handle().stall(ERROR_STALL_TIME);
-            return Into::<Status>::into(err);
+            return Status::INVALID_LANGUAGE;
         }
     };
     log::info!("kernel file loaded and verified");

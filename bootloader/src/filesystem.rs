@@ -83,6 +83,56 @@ pub enum AcquireRootError {
     InvalidVolume,
 }
 
+/// Converts `path` to a [`CStr16`], then loads a file from `directory` and validates
+/// that it matches the digest.
+///
+/// # Errors
+/// Can return both [`ToCStr16Error`]s and [`LoadFileError`]s when appropriate.
+pub fn load_file_convert(
+    directory: &mut Directory,
+    path: &str,
+    valid_digest: Digest,
+    buffer: &mut Vec<u16>,
+) -> Result<Vec<u8>, LoadFileConvertError> {
+    let path = convert_to_cstr16(path, buffer)?;
+
+    load_file(directory, path, valid_digest).map_err(Into::into)
+}
+
+/// Various errors occurring when attempting to load a file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoadFileConvertError {
+    /// Error occurred while converting the path.
+    ConversionError(ToCStr16Error),
+    /// Error occurred while loading the file.
+    LoadError(LoadFileError),
+}
+
+impl Display for LoadFileConvertError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            LoadFileConvertError::ConversionError(err) => {
+                write!(f, "error converting path to UCS-2: {err}")
+            }
+            LoadFileConvertError::LoadError(err) => {
+                write!(f, "error occurred while loading file: {err}")
+            }
+        }
+    }
+}
+
+impl From<ToCStr16Error> for LoadFileConvertError {
+    fn from(value: ToCStr16Error) -> Self {
+        Self::ConversionError(value)
+    }
+}
+
+impl From<LoadFileError> for LoadFileConvertError {
+    fn from(value: LoadFileError) -> Self {
+        Self::LoadError(value)
+    }
+}
+
 /// Loads a file from the specified [`Directory`] and validates that it matches the digest.
 ///
 /// # Errors
@@ -241,7 +291,7 @@ impl Display for LoadFileError {
             LoadFileError::OutOfResources => f.write_str("out of resources"),
             LoadFileError::NotFile => f.write_str("requested item was not a file"),
             LoadFileError::AccessDenied => f.write_str("access to the file was not allowed"),
-            LoadFileError::VolumeCorrupted => f.write_str("the voluem was corrupted"),
+            LoadFileError::VolumeCorrupted => f.write_str("the volume was corrupted"),
             LoadFileError::InvalidDigest => {
                 f.write_str("the digest of the file was unexpected: verify its authenticity")
             }

@@ -1,3 +1,5 @@
+//! Implementations of various cryptographic hashing algorithms.
+
 #![no_std]
 #![feature(
     lint_reasons,
@@ -8,7 +10,6 @@
     const_mut_refs,
     const_maybe_uninit_write
 )]
-//! Implementations of various cryptographic hashing algorithms.
 
 use core::mem::MaybeUninit;
 

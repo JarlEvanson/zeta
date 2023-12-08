@@ -5,7 +5,7 @@ use core::{fmt::Display, mem::MaybeUninit};
 use digest::sha512::{bytes::Sha512, Digest};
 use uefi::{
     boot::acquire_boot_handle,
-    data_types::Align,
+    data_types::{Align, FromStrWithBufError},
     proto::{
         loaded_image::LoadedImage,
         media::{
@@ -17,7 +17,7 @@ use uefi::{
     CStr16, Status,
 };
 
-use crate::vec::Vec;
+use crate::vec::{TryAllocateError, Vec};
 
 /// Acquire the root directory of the boot partition.
 ///
@@ -259,6 +259,60 @@ impl From<LoadFileError> for Status {
             LoadFileError::AccessDenied => Status::ACCESS_DENIED,
             LoadFileError::VolumeCorrupted => Status::VOLUME_CORRUPTED,
             LoadFileError::InvalidDigest => Status::SECURITY_VIOLATION,
+        }
+    }
+}
+
+/// Creates a [`CStr16`] using `buffer` as the underlying storage.
+pub fn convert_to_cstr16<'buffer>(
+    str: &str,
+    buffer: &'buffer mut Vec<u16>,
+) -> Result<&'buffer CStr16, ToCStr16Error> {
+    // Additional 1 for the null character.
+    let u16_count = str.encode_utf16().count() + 1;
+
+    if u16_count > buffer.capacity() {
+        buffer.try_reserve(u16_count - buffer.len())?;
+
+        let unit_buffer = buffer.spare_capacity_mut();
+        unit_buffer.fill(MaybeUninit::new(0xFFFF));
+
+        // SAFETY:
+        // The entire vector has been initialized, and is at least `u16_count` elements long.
+        unsafe {
+            buffer.set_len(u16_count);
+        }
+    }
+
+    CStr16::from_str_with_buf(str, buffer.as_slice_mut()).map_err(Into::into)
+}
+
+/// Various errors that can occur when converting a [`str`] to a [`CStr16`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToCStr16Error {
+    /// An allocation failure occurred.
+    AllocationFailure(TryAllocateError),
+    /// An string conversion error occurred.
+    StringError(FromStrWithBufError),
+}
+
+impl From<TryAllocateError> for ToCStr16Error {
+    fn from(value: TryAllocateError) -> Self {
+        ToCStr16Error::AllocationFailure(value)
+    }
+}
+
+impl From<FromStrWithBufError> for ToCStr16Error {
+    fn from(value: FromStrWithBufError) -> Self {
+        ToCStr16Error::StringError(value)
+    }
+}
+
+impl Display for ToCStr16Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ToCStr16Error::AllocationFailure(err) => write!(f, "allocation error: {err}"),
+            ToCStr16Error::StringError(err) => write!(f, "string conversion error: {err}"),
         }
     }
 }

@@ -18,7 +18,12 @@ use uefi::{
     CStr16, Handle, Status,
 };
 
-use crate::config::parse_configuration_file;
+use crate::{
+    config::parse_configuration_file,
+    filesystem::convert_to_cstr16,
+    logging::{set_global_filter, set_serial_filter},
+    vec::Vec,
+};
 
 mod config;
 mod filesystem;
@@ -35,14 +40,14 @@ const CONFIG_PATH: &CStr16 = uefi::cstr16!("zeta\\config.toml");
 #[export_name = "digest"]
 #[link_section = ".config"]
 static CONFIG_DIGEST: Digest = Digest::from_u64s([
-    0x0340_f948_f096_c1cb,
-    0xd1b7_3efd_a6f5_4a49,
-    0xc28b_8bd9_397a_ba28,
-    0x5abf_8552_293e_dde6,
-    0x4fc3_763a_0db9_cad7,
-    0x53bd_1e19_03a7_6d65,
-    0x18de_de79_36ae_3896,
-    0xe699_4aad_8db6_4eb3,
+    0xbb77_b007_a4c1_012f,
+    0x43fc_5bef_9875_f949,
+    0x5552_d95d_f7eb_600d,
+    0x5e63_74e9_08e4_fdd5,
+    0xf54d_257d_eb1a_acda,
+    0x0de5_fed2_f6c8_44cc,
+    0x68d5_a396_b334_856c,
+    0x979e_7884_fd7b_10ff,
 ]);
 
 /// The amount of time we stall before returning in the event of an error.
@@ -94,14 +99,38 @@ fn main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
         return Status::INVALID_LANGUAGE;
     };
 
-    log::info!(target: "config", "parsing configuration file");
-    parse_configuration_file(config_string).unwrap();
+    let Ok(config) = parse_configuration_file(config_string) else {
+        log::error!("error parsing config file: ");
+        acquire_boot_handle().stall(ERROR_STALL_TIME);
+        return Status::INVALID_LANGUAGE;
+    };
+    log::info!(target: "config", "configuration file parsed");
+    log::debug!(target: "config", "{:#?}", config);
 
-    // let Ok(config) = Config::parse(config_string) else {
-    //     log::error!("error parsing config file: ");
-    //     acquire_boot_handle().stall(ERROR_STALL_TIME);
-    //     return Status::INVALID_LANGUAGE;
-    // };
+    set_global_filter(config.logging.global);
+    set_serial_filter(config.logging.serial);
+
+    let mut name_buffer = Vec::new();
+
+    let kernel_path = config.strings.lookup(config.kernel.path);
+    log::info!("loading kernel file from {}", kernel_path);
+    let kernel_path = match convert_to_cstr16(kernel_path, &mut name_buffer) {
+        Ok(path) => path,
+        Err(err) => {
+            log::error!(target: "config", "error converting kernel path to USC-2: {}", err);
+            acquire_boot_handle().stall(ERROR_STALL_TIME);
+            return Status::INVALID_LANGUAGE;
+        }
+    };
+    let result = match load_file(&mut root_dir, kernel_path, CONFIG_DIGEST) {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            log::error!("{}", err);
+            acquire_boot_handle().stall(ERROR_STALL_TIME);
+            return Into::<Status>::into(err);
+        }
+    };
+    log::info!("kernel file loaded and verified");
 
     loop {
         core::hint::spin_loop();

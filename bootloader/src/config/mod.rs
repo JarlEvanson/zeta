@@ -1,3 +1,7 @@
+//! Configuration for the bootloader.
+//!
+//! Contains a TOML parser specifically for the config file.
+
 use core::fmt::Debug;
 
 use digest::sha512::Digest;
@@ -117,17 +121,22 @@ impl Debug for Config {
     }
 }
 
+/// A compact storage for [`str`]s.
 pub struct StringStorage {
+    /// The underlying storage for the bytes making up the stored [`str`]s.
     storage: Vec<u8>,
 }
 
 impl StringStorage {
+    /// Creates a new [`StringStorage`].
     pub fn new() -> StringStorage {
         Self {
             storage: Vec::new(),
         }
     }
 
+    /// Adds a [`str`] produced from `iter` to the [`StringStorage`] and returns
+    /// its handle.
     pub fn add_str_from_chars<I: Iterator<Item = char> + Clone>(
         &mut self,
         iter: I,
@@ -138,7 +147,7 @@ impl StringStorage {
 
         self.storage.try_reserve(byte_count).map_err(|_| ())?;
 
-        for c in iter.map(CharByteIter::new).flatten() {
+        for c in iter.flat_map(CharByteIter::new) {
             assert!(self.storage.push_within_capacity(c).is_ok());
         }
 
@@ -150,30 +159,35 @@ impl StringStorage {
         Ok(handle)
     }
 
+    /// Retrives the [`str`] associated with `handle`.
+    ///
+    /// # Panics
+    /// Panics if `handle` does not beong to this [`StringStorage`].
     pub fn lookup(&self, handle: StringHandle) -> &str {
         core::str::from_utf8(&self.storage.as_slice()[handle.start..(handle.start + handle.len)])
             .unwrap()
     }
 }
 
-impl Debug for StringStorage {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str("StringStorage")
-    }
-}
-
+/// A handle to a [`str`] stored in a [`StringStorage`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StringHandle {
+    /// The byte index of the start of the [`str`].
     start: usize,
+    /// The length of the [`str`].
     len: usize,
 }
 
+/// An iterator over the bytes of a utf-8 encoded codepoint.
 struct CharByteIter {
+    /// The length of the codepoint.
     len_utf8: usize,
+    /// The byte iterator.
     iter: core::array::IntoIter<u8, 4>,
 }
 
 impl CharByteIter {
+    /// Creates a new [`CharByteIter`] from `c`.
     fn new(c: char) -> CharByteIter {
         let mut k = [0; 4];
         c.encode_utf8(&mut k);

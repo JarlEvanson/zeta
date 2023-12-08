@@ -304,15 +304,18 @@ impl<T> Vec<T> {
         let Self {
             allocated: _,
             capacity,
-            len,
+            len: _,
             phantom: _,
         } = self;
 
         let slice = if let Some(ptr) = self.get_aligned_ptr() {
             // SAFETY:
             // `ptr` is properly aligned and by the invariants of `Vec`,
-            // points to `len` initialized elements.
-            unsafe { core::slice::from_raw_parts_mut(ptr.cast::<MaybeUninit<T>>().as_ptr(), len) }
+            // points to `capacity` initialized elements since `MaybeUninit`
+            // is always initialized.
+            unsafe {
+                core::slice::from_raw_parts_mut(ptr.cast::<MaybeUninit<T>>().as_ptr(), capacity)
+            }
         } else {
             &mut []
         };

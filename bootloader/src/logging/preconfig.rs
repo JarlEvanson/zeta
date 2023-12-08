@@ -2,49 +2,49 @@
 
 use log::LevelFilter;
 
+/// The default level for pre-config logging.
+const DEFAULT_LEVEL: LevelFilter = LevelFilter::Error;
+
 /// Configuration of the [`GLOBAL_FILTER`][f] before reading the configuration file.
 ///
 /// [f]: super::GLOBAL_FILTER
-pub const PRECONFIG_GLOBAL: LevelFilter =
-    match level_filter_from_str(match core::option_env!("PRECONFIG_GLOBAL") {
-        Some(env) => env,
-        None => "error",
-    }) {
+pub const PRECONFIG_GLOBAL: LevelFilter = match core::option_env!("PRECONFIG_GLOBAL") {
+    Some(env) => match level_filter_from_str(env) {
         Some(filter) => filter,
         None => panic!(
             "`PRECONFIG_GLOBAL` must be either `off`, `error`, `warn`, `info`, `debug`, or `trace`"
         ),
-    };
+    },
+    None => DEFAULT_LEVEL,
+};
 
 /// Configuration of the [`SERIAL_FILTER`][f] before reading the configuration file.
 ///
 /// [f]: super::SERIAL_FILTER
 #[cfg(feature = "serial_logging")]
-pub const PRECONFIG_SERIAL: LevelFilter =
-    match level_filter_from_str(match core::option_env!("PRECONFIG_SERIAL") {
-        Some(env) => env,
-        None => "error",
-    }) {
+pub const PRECONFIG_SERIAL: LevelFilter = match core::option_env!("PRECONFIG_SERIAL") {
+    Some(env) => match level_filter_from_str(env) {
         Some(filter) => filter,
         None => panic!(
             "`PRECONFIG_SERIAL` must be either `off`, `error`, `warn`, `info`, `debug`, or `trace`"
         ),
-    };
+    },
+    None => DEFAULT_LEVEL,
+};
 
 /// Configuration of the [`FRAMEBUFFER_FILTER`][f] before reading the configuration file.
 ///
 /// [f]: super::FRAMEBUFFER_FILTER
 #[cfg(feature = "framebuffer_logging")]
-pub const PRECONFIG_FRAMEBUFFER: LevelFilter =
-    match level_filter_from_str(match core::option_env!("PRECONFIG_FRAMEBUFFER") {
-        Some(env) => env,
-        None => "error",
-    }) {
+pub const PRECONFIG_FRAMEBUFFER: LevelFilter = match core::option_env!("PRECONFIG_FRAMEBUFFER") {
+    Some(env) => match level_filter_from_str(env) {
         Some(filter) => filter,
         None => panic!(
             "`PRECONFIG_FRAMEBUFFER` must be either `off`, `error`, `warn`, `info`, `debug`, or `trace`"
         ),
-    };
+    },
+    None => DEFAULT_LEVEL,
+};
 
 /// Parses a [`LevelFilter`] from a string.
 const fn level_filter_from_str(filter: &str) -> Option<LevelFilter> {

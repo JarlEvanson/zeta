@@ -242,6 +242,16 @@ impl From<ParseUnicodeScalarError> for ParseBasicStringError {
     }
 }
 
+impl Display for ParseBasicStringError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "error ocurred at {}:{}: {}",
+            self.line, self.column, self.kind
+        )
+    }
+}
+
 /// Various types of errors that can occur while parsing a [`BasicStringIterator`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParseBasicStringErrorKind {
@@ -264,6 +274,28 @@ pub enum ParseBasicStringErrorKind {
     },
     /// The lexer reached `eof` unexpectedly.
     UnexpectedEof,
+}
+
+impl Display for ParseBasicStringErrorKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ParseBasicStringErrorKind::MissingOpeningQuotationMark => {
+                f.write_str("missing opening quotation mark")
+            }
+            ParseBasicStringErrorKind::IllegalCharacter { c } => {
+                write!(f, "illegal character {c:?}")
+            }
+            ParseBasicStringErrorKind::IllegalEscape { c } => write!(f, "illegal escape \'{c}\'"),
+            ParseBasicStringErrorKind::IllegalUnicodeScalar { value } => {
+                if *value > 0xFFFF {
+                    write!(f, "{value:08X} is not a valid unicode scalar value")
+                } else {
+                    write!(f, "{value:04X} is not a valid unicode scalar value")
+                }
+            }
+            ParseBasicStringErrorKind::UnexpectedEof => write!(f, "lexer unexpectedly reached EOF"),
+        }
+    }
 }
 
 /// An iterator over the resolved characters of a TOML multi-line basic string.
@@ -295,13 +327,20 @@ impl<'str> MultiLineBasicStringIterator<'str> {
             let _ = lexer.bump();
         }
 
+        lexer.flush_token();
+
         let mut state = State::Normal;
 
         while !lexer.is_eof() {
             let c = lexer.first();
 
             // Illegal control characters inside multi-line basic string.
-            if ('\u{0}'..='\u{8}').contains(&c) || ('\n'..='\u{1F}').contains(&c) || c == '\u{7F}' {
+            if ('\u{0}'..='\u{8}').contains(&c)
+                || c == '\u{B}'
+                || c == '\u{C}'
+                || ('\u{E}'..='\u{1F}').contains(&c)
+                || c == '\u{7F}'
+            {
                 let err = ParseMultiLineBasicStringError {
                     kind: ParseMultiLineBasicStringErrorKind::IllegalCharacter { c },
                     line: lexer.current_line(),
@@ -378,13 +417,13 @@ impl Iterator for MultiLineBasicStringIterator<'_> {
     type Item = char;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let current_char = self.0.next()?;
-
-        if current_char != '\\' {
-            return Some(current_char);
-        }
-
         loop {
+            let current_char = self.0.next()?;
+
+            if current_char != '\\' {
+                return Some(current_char);
+            }
+
             match self.0.next() {
                 // Backspace
                 Some('b') => return Some('\u{0008}'),
@@ -407,6 +446,10 @@ impl Iterator for MultiLineBasicStringIterator<'_> {
                     // Therefore, this operation should never panic.
                     let descriptor = self.0.as_str().get(0..4).unwrap();
 
+                    for _ in 0..4 {
+                        let _ = self.0.next();
+                    }
+
                     // PANIC SAFETY:
                     // The operation below was previously tested when the underlying string was parsed.
                     // Therefore, this operation should never panic.
@@ -424,6 +467,10 @@ impl Iterator for MultiLineBasicStringIterator<'_> {
                     // Therefore, this operation should never panic.
                     let descriptor = self.0.as_str().get(0..8).unwrap();
 
+                    for _ in 0..8 {
+                        let _ = self.0.next();
+                    }
+
                     // PANIC SAFETY:
                     // The operation below was previously tested when the underlying string was parsed.
                     // Therefore, this operation should never panic.
@@ -434,16 +481,14 @@ impl Iterator for MultiLineBasicStringIterator<'_> {
                     // Therefore, this operation should never panic.
                     return char::from_u32(value);
                 }
-                Some(w)
-                    if is_whitespace(w)
-                        || w == '\n'
-                        || (w == '\r' && self.0.clone().next() == Some('\n')) =>
-                {
+                Some(w) if is_whitespace(w) || is_newline(self.0.as_str()) => {
                     let mut peeker = self.0.clone();
 
                     while let Some(peeked) = peeker.next() {
                         if is_whitespace(peeked) || is_newline(peeker.as_str()) {
                             self.0.next();
+                        } else {
+                            break;
                         }
                     }
                 }
@@ -451,7 +496,7 @@ impl Iterator for MultiLineBasicStringIterator<'_> {
                     // PANIC SAFETY:
                     // The operation below was previously tested when the underlying string was parsed.
                     // Therefore, this operation should never panic.
-                    unreachable!("a valid basic string must not include a broken escape")
+                    unreachable!("a valid multi-line basic string must not include a broken escape")
                 }
             };
         }
@@ -516,6 +561,16 @@ impl From<ParseUnicodeScalarError> for ParseMultiLineBasicStringError {
     }
 }
 
+impl Display for ParseMultiLineBasicStringError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(
+            f,
+            "error ocurred at {}:{}: {}",
+            self.line, self.column, self.kind
+        )
+    }
+}
+
 /// Various types of errors that can occur while parsing a [`MultiLineBasicStringIterator`].
 pub enum ParseMultiLineBasicStringErrorKind {
     /// At least on of the three opening quotation marks is missing.
@@ -537,6 +592,32 @@ pub enum ParseMultiLineBasicStringErrorKind {
     },
     /// The lexer reached `eof` unexpectedly.
     UnexpectedEof,
+}
+
+impl Display for ParseMultiLineBasicStringErrorKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ParseMultiLineBasicStringErrorKind::MissingOpeningQuotationMark => {
+                f.write_str("missing opening quotation mark")
+            }
+            ParseMultiLineBasicStringErrorKind::IllegalCharacter { c } => {
+                write!(f, "illegal character {c:?}")
+            }
+            ParseMultiLineBasicStringErrorKind::IllegalEscape { c } => {
+                write!(f, "illegal escape \'{c}\'")
+            }
+            ParseMultiLineBasicStringErrorKind::IllegalUnicodeScalar { value } => {
+                if *value > 0xFFFF {
+                    write!(f, "{value:08X} is not a valid unicode scalar value")
+                } else {
+                    write!(f, "{value:04X} is not a valid unicode scalar value")
+                }
+            }
+            ParseMultiLineBasicStringErrorKind::UnexpectedEof => {
+                write!(f, "lexer unexpectedly reached EOF")
+            }
+        }
+    }
 }
 
 /// A wrapper around [`Chars`] that makes it comparable.
@@ -654,7 +735,13 @@ pub(super) trait StringLike: PartialEq<str> + Display {}
 impl<T> StringLike for T where T: PartialEq<str> + Display {}
 
 /// Parses a unicode scalar of `count` hex digits.
-fn parse_unicode_scalar(lexer: &mut Lexer, count: usize) -> Result<char, ParseUnicodeScalarError> {
+fn parse_unicode_scalar(
+    lexer: &mut Lexer,
+    hex_digit_count: usize,
+) -> Result<char, ParseUnicodeScalarError> {
+    let remaining = lexer.untokenized_str();
+    let mut count = 0;
+
     while !lexer.is_eof() {
         if !lexer.first().is_ascii_hexdigit() {
             let err = ParseUnicodeScalarError {
@@ -667,15 +754,16 @@ fn parse_unicode_scalar(lexer: &mut Lexer, count: usize) -> Result<char, ParseUn
         }
 
         let _ = lexer.bump();
+        count += 1;
 
-        if lexer.token_char_count() == count {
-            let value = u32::from_str_radix(lexer.token_str(), 16).unwrap();
+        if count == hex_digit_count {
+            let value = u32::from_str_radix(&remaining[0..hex_digit_count], 16).unwrap();
 
-            char::from_u32(value).ok_or(ParseUnicodeScalarError {
+            return char::from_u32(value).ok_or(ParseUnicodeScalarError {
                 kind: ParseUnicodeScalarErrorKind::IllegalUnicodeScalar { value },
                 line: lexer.current_line(),
-                column: lexer.current_column() - count,
-            })?;
+                column: lexer.current_column() - hex_digit_count,
+            });
         }
     }
 
@@ -718,7 +806,9 @@ enum ParseUnicodeScalarErrorKind {
 
 #[cfg(test)]
 mod test {
-    use super::BasicStringIterator;
+    use super::{BasicStringIterator, MultiLineBasicStringIterator};
+
+    use crate::config::parser::Lexer;
 
     #[test]
     fn basic_string() {
@@ -727,9 +817,37 @@ mod test {
         const EXPECTED_STR: &str =
             "I'm a string. \"You can quote me\". Name\tJos\u{00E9}\nLocation\tSF.\nEmoji:\t\u{1F602}";
 
-        let result = BasicStringIterator::parse_from_str(TEST_STR).unwrap();
+        let mut lexer = Lexer::new_testing(TEST_STR);
+
+        let result = match BasicStringIterator::parse(&mut lexer) {
+            Ok(result) => result,
+            Err(err) => {
+                panic!("{}\nRemaining: {:?}", err, lexer.untokenized_str());
+            }
+        };
 
         if !<BasicStringIterator as PartialEq<str>>::eq(&result, EXPECTED_STR) {
+            panic!("Expected: {}\nActual: {}", EXPECTED_STR, result,);
+        }
+    }
+
+    #[test]
+    fn multi_line_basic_string() {
+        const TEST_STR: &str =
+            "\"\"\"I'm a string. \"You can quote me\". Name\\tJos\\u00E9\\nLocation\\tSF.\\nEmoji:\\t\\U0001F602\nNew Line: \"\"Double Quotes\"\\\" \\ Whitespace deletion\"\"\"";
+        const EXPECTED_STR: &str =
+            "I'm a string. \"You can quote me\". Name\tJos\u{00E9}\nLocation\tSF.\nEmoji:\t\u{1F602}\nNew Line: \"\"Double Quotes\"\" Whitespace deletion";
+
+        let mut lexer = Lexer::new_testing(TEST_STR);
+
+        let result = match MultiLineBasicStringIterator::parse(&mut lexer) {
+            Ok(result) => result,
+            Err(err) => {
+                panic!("{}\nRemaining: {:?}", err, lexer.untokenized_str());
+            }
+        };
+
+        if !<MultiLineBasicStringIterator as PartialEq<str>>::eq(&result, EXPECTED_STR) {
             panic!("Expected: {}\nActual: {}", EXPECTED_STR, result);
         }
     }

@@ -2,7 +2,8 @@
 
 use core::{
     alloc::Layout,
-    fmt::Debug,
+    error::Error,
+    fmt::{Debug, Display},
     marker::PhantomData,
     mem::{self, MaybeUninit},
     ptr::NonNull,
@@ -46,19 +47,19 @@ impl<T> Vec<T> {
     /// - Returns [`CapacityOverflow`][co] if the computed capacity would exceed `isize::MAX` bytes.
     /// - Returns [`AllocError`][ae] if an error occured during allocation.
     ///
-    /// [co]: TryWithCapacityError::CapacityOverflow
-    /// [ae]: TryWithCapacityError::AllocError
-    pub fn with_capacity(capacity: usize) -> Result<Vec<T>, TryWithCapacityError> {
+    /// [co]: TryAllocateError::CapacityOverflow
+    /// [ae]: TryAllocateError::AllocError
+    pub fn with_capacity(capacity: usize) -> Result<Vec<T>, TryAllocateError> {
         if capacity == 0 {
             return Ok(Vec::new());
         }
 
         let Ok(layout) = Layout::array::<T>(capacity) else {
-            return Err(TryWithCapacityError::CapacityOverflow);
+            return Err(TryAllocateError::CapacityOverflow);
         };
 
         let actual_size = required_buf_size(8, mem::align_of::<T>(), layout.size())
-            .ok_or(TryWithCapacityError::CapacityOverflow)?;
+            .ok_or(TryAllocateError::CapacityOverflow)?;
 
         let boot_handle = acquire_boot_handle();
 
@@ -67,9 +68,7 @@ impl<T> Vec<T> {
             .map(NonNull::new)
         {
             Ok(Some(ptr)) => ptr.cast::<T>(),
-            Err(_) | Ok(None) => {
-                return Err(TryWithCapacityError::AllocError { size: actual_size })
-            }
+            Err(_) | Ok(None) => return Err(TryAllocateError::AllocError { size: actual_size }),
         };
 
         let vec = Vec {
@@ -146,9 +145,9 @@ impl<T> Vec<T> {
     /// - Returns [`CapacityOverflow`][co] if the computed capacity would exceed `isize::MAX` bytes.
     /// - Returns [`AllocError`][ae] if an error occured during allocation.
     ///
-    /// [co]: TryReserveError::CapacityOverflow
-    /// [ae]: TryReserveError::AllocError
-    pub fn try_reserve(&mut self, additional_capacity: usize) -> Result<(), TryReserveError> {
+    /// [co]: TryAllocateError::CapacityOverflow
+    /// [ae]: TryAllocateError::AllocError
+    pub fn try_reserve(&mut self, additional_capacity: usize) -> Result<(), TryAllocateError> {
         if additional_capacity == 0 {
             return Ok(());
         }
@@ -159,15 +158,15 @@ impl<T> Vec<T> {
             }
             new_capacity
         } else {
-            return Err(TryReserveError::CapacityOverflow);
+            return Err(TryAllocateError::CapacityOverflow);
         };
 
         let Ok(layout) = Layout::array::<T>(new_capacity) else {
-            return Err(TryReserveError::CapacityOverflow);
+            return Err(TryAllocateError::CapacityOverflow);
         };
 
         let actual_size = required_buf_size(8, mem::align_of::<T>(), layout.size())
-            .ok_or(TryReserveError::CapacityOverflow)?;
+            .ok_or(TryAllocateError::CapacityOverflow)?;
 
         match &mut self.allocated {
             Allocated::Allocated { ptr, handle } => {
@@ -177,7 +176,7 @@ impl<T> Vec<T> {
                 {
                     Ok(Some(new_ptr)) => new_ptr.cast::<T>(),
                     Err(_) | Ok(None) => {
-                        return Err(TryReserveError::AllocError { size: actual_size })
+                        return Err(TryAllocateError::AllocError { size: actual_size })
                     }
                 };
 
@@ -211,7 +210,7 @@ impl<T> Vec<T> {
                 {
                     Ok(Some(ptr)) => ptr.cast::<T>(),
                     Err(_) | Ok(None) => {
-                        return Err(TryReserveError::AllocError { size: actual_size })
+                        return Err(TryAllocateError::AllocError { size: actual_size })
                     }
                 };
 
@@ -255,6 +254,8 @@ impl<T> Vec<T> {
     ///
     /// [c]: Self::capacity
     pub unsafe fn set_len(&mut self, new_len: usize) {
+        assert!(new_len <= self.capacity);
+
         self.len = new_len;
     }
 
@@ -414,9 +415,9 @@ enum Allocated<T> {
     Unallocated,
 }
 
-/// Various errors that can occur when calling [`Vec::with_capacity`].
+/// Various errors that can occur when calling [`Vec::try_reserve`] or [`Vec::with_capacity`].
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum TryWithCapacityError {
+pub enum TryAllocateError {
     /// Error due to the computed capacity exceeding the collection's maximum
     /// (usually `isize::MAX` bytes)
     CapacityOverflow,
@@ -427,19 +428,21 @@ pub enum TryWithCapacityError {
         size: usize,
     },
 }
-/// Various errors that can occur when calling [`Vec::try_reserve`].
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum TryReserveError {
-    /// Error due to the computed capacity exceeding the collection's maximum
-    /// (usually `isize::MAX` bytes)
-    CapacityOverflow,
 
-    /// An error occurred while attempting to allocate a buffer.
-    AllocError {
-        /// Number of bytes in the allocation request that failed.
-        size: usize,
-    },
+impl Display for TryAllocateError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            TryAllocateError::CapacityOverflow => {
+                f.write_str("the requested allocation exceeded the maximum capacity")
+            }
+            TryAllocateError::AllocError { size } => {
+                write!(f, "request to allocate {size} bytes failed")
+            }
+        }
+    }
 }
+
+impl Error for TryAllocateError {}
 
 /// Calculates the actual buffer size required to allocate a buffer capable of storing
 /// `byte_count` bytes aligned to `guaranteed_alignment` when the allocator only guarantees

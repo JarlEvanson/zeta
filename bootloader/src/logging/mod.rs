@@ -43,6 +43,16 @@ static mut SERIAL_STATE: Mutex<SerialState> = Mutex::new(SerialState::Uninitiali
 #[cfg(feature = "serial_logging")]
 static SERIAL_FILTER: AtomicLevelFilter = AtomicLevelFilter::new(LevelFilter::Off);
 
+/// Atomically updates the [`GLOBAL_FILTER`] to `filter`.
+pub fn set_global_filter(filter: LevelFilter) {
+    GLOBAL_FILTER.store(filter, Ordering::Relaxed);
+}
+
+/// Atomically updates [`SERIAL_FILTER`] to `filter`.
+pub fn set_serial_filter(filter: LevelFilter) {
+    SERIAL_FILTER.store(filter, Ordering::Relaxed);
+}
+
 /// The private representation of the logger.
 struct Logger;
 

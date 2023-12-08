@@ -10,7 +10,6 @@ mod parser;
 pub use parser::parse_configuration_file;
 
 /// A parsed TOML configuration file.
-#[derive(Debug)]
 pub struct Config {
     /// If true, then all unused memory will be randomized.
     pub randomize_memory: bool,
@@ -57,6 +56,65 @@ pub struct Module {
     pub checksum: Digest,
     /// Arguments to be passed to the module.
     pub args: Vec<StringHandle>,
+}
+
+impl Debug for Config {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut dstruct = f.debug_struct("Config");
+
+        dstruct.field("randomize_memory", &self.randomize_memory);
+        dstruct.field("logging", &self.logging);
+
+        dstruct.field_with("kernel", |f| {
+            let mut dstruct = f.debug_struct("Kernel");
+
+            dstruct.field("path", &self.strings.lookup(self.kernel.path));
+            dstruct.field("checksum", &self.kernel.checksum);
+
+            dstruct.field_with("args", |f| {
+                let mut dlist = f.debug_list();
+
+                for arg in self.kernel.args.as_slice().iter().copied() {
+                    dlist.entry(&self.strings.lookup(arg));
+                }
+
+                dlist.finish()
+            });
+
+            dstruct.finish()
+        });
+
+        dstruct.field_with("modules", |f| {
+            let mut dlist = f.debug_list();
+
+            for module in self.modules.as_slice() {
+                dlist.entry_with(|f| {
+                    let mut dstruct = f.debug_struct("Module");
+
+                    dstruct.field("path", &self.strings.lookup(module.path));
+                    dstruct.field("checksum", &module.checksum);
+
+                    dstruct.field_with("args", |f| {
+                        let mut dlist = f.debug_list();
+
+                        for arg in module.args.as_slice().iter().copied() {
+                            dlist.entry(&self.strings.lookup(arg));
+                        }
+
+                        dlist.finish()
+                    });
+
+                    dstruct.finish()
+                });
+            }
+
+            dlist.finish()
+        });
+
+        dstruct.field_with("strings", |f| f.write_str("StringStorage"));
+
+        dstruct.finish_non_exhaustive()
+    }
 }
 
 pub struct StringStorage {

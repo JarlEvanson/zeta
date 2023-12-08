@@ -2,7 +2,13 @@
 
 #![no_std]
 #![cfg_attr(not(test), no_main)]
-#![feature(lint_reasons, maybe_uninit_slice, strict_provenance, error_in_core)]
+#![feature(
+    lint_reasons,
+    maybe_uninit_slice,
+    strict_provenance,
+    error_in_core,
+    debug_closure_helpers
+)]
 
 use digest::sha512::Digest;
 use filesystem::{acquire_boot_partition_root_directory, load_file, AcquireRootError};

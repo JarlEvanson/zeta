@@ -111,10 +111,6 @@ pub enum AcquireRootError {
 /// [oor]: LoadFileError::OutOfResources
 /// [nfi]: LoadFileError::NotFile
 /// [id]: LoadFileError::InvalidDigest
-#[expect(
-    clippy::missing_panics_doc,
-    reason = "only panic is the assertion that the alignment of` FileInfo` is at most 8"
-)]
 pub fn load_file(
     directory: &mut Directory,
     path: &CStr16,

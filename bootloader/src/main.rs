@@ -19,6 +19,9 @@ mod filesystem;
 mod logging;
 mod vec;
 
+/// The default logging level.
+pub const DEFAULT_LOGGING_LEVEL: log::LevelFilter = log::LevelFilter::Info;
+
 /// The path to the configuration file.
 const CONFIG_PATH: &CStr16 = uefi::cstr16!("zeta\\config.toml");
 

@@ -15,6 +15,7 @@ pub mod ident;
 /// The only ELF version this library supports.
 pub const ELF_VERSION: u8 = 1;
 
+/// An ELF file.
 pub struct Elf<'file> {
     /// The underlying bytes of the ELF file.
     bytes: &'file [u8],
@@ -53,9 +54,12 @@ impl<'file> Elf<'file> {
     }
 }
 
+/// Various errors which can occur while doing a minimal parse of an ELF file.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ParseElfError {
+    /// An error parsing the ELF [`Ident`].
     IdentError(ParseIdentError),
+    /// An error parsing the ELF [`Header`].
     HeaderError(ParseHeaderError),
 }
 

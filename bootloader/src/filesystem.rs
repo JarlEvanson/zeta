@@ -5,7 +5,7 @@ use core::{fmt::Display, mem::MaybeUninit};
 use digest::sha512::{bytes::Sha512, Digest};
 use uefi::{
     boot::acquire_boot_handle,
-    data_types::{Align, FromStrWithBufError},
+    data_types::Align,
     proto::{
         loaded_image::LoadedImage,
         media::{
@@ -17,7 +17,7 @@ use uefi::{
     CStr16, Status,
 };
 
-use crate::vec::{TryAllocateError, Vec};
+use crate::vec::Vec;
 
 /// Acquire the root directory of the boot partition.
 ///
@@ -81,56 +81,6 @@ pub enum AcquireRootError {
     InvalidBootMethod,
     /// Opening the volume from which the bootloader image was loaded failed.
     InvalidVolume,
-}
-
-/// Converts `path` to a [`CStr16`], then loads a file from `directory` and validates
-/// that it matches the digest.
-///
-/// # Errors
-/// Can return both [`ToCStr16Error`]s and [`LoadFileError`]s when appropriate.
-pub fn load_file_convert(
-    directory: &mut Directory,
-    path: &str,
-    valid_digest: Digest,
-    buffer: &mut Vec<u16>,
-) -> Result<Vec<u8>, LoadFileConvertError> {
-    let path = convert_to_cstr16(path, buffer)?;
-
-    load_file(directory, path, valid_digest).map_err(Into::into)
-}
-
-/// Various errors occurring when attempting to load a file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LoadFileConvertError {
-    /// Error occurred while converting the path.
-    ConversionError(ToCStr16Error),
-    /// Error occurred while loading the file.
-    LoadError(LoadFileError),
-}
-
-impl Display for LoadFileConvertError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            LoadFileConvertError::ConversionError(err) => {
-                write!(f, "error converting path to UCS-2: {err}")
-            }
-            LoadFileConvertError::LoadError(err) => {
-                write!(f, "error occurred while loading file: {err}")
-            }
-        }
-    }
-}
-
-impl From<ToCStr16Error> for LoadFileConvertError {
-    fn from(value: ToCStr16Error) -> Self {
-        Self::ConversionError(value)
-    }
-}
-
-impl From<LoadFileError> for LoadFileConvertError {
-    fn from(value: LoadFileError) -> Self {
-        Self::LoadError(value)
-    }
 }
 
 /// Loads a file from the specified [`Directory`] and validates that it matches the digest.
@@ -309,60 +259,6 @@ impl From<LoadFileError> for Status {
             LoadFileError::AccessDenied => Status::ACCESS_DENIED,
             LoadFileError::VolumeCorrupted => Status::VOLUME_CORRUPTED,
             LoadFileError::InvalidDigest => Status::SECURITY_VIOLATION,
-        }
-    }
-}
-
-/// Creates a [`CStr16`] using `buffer` as the underlying storage.
-pub fn convert_to_cstr16<'buffer>(
-    str: &str,
-    buffer: &'buffer mut Vec<u16>,
-) -> Result<&'buffer CStr16, ToCStr16Error> {
-    // Additional 1 for the null character.
-    let u16_count = str.encode_utf16().count() + 1;
-
-    if u16_count > buffer.capacity() {
-        buffer.try_reserve(u16_count - buffer.len())?;
-
-        let unit_buffer = buffer.spare_capacity_mut();
-        unit_buffer.fill(MaybeUninit::new(0xFFFF));
-
-        // SAFETY:
-        // The entire vector has been initialized, and is at least `u16_count` elements long.
-        unsafe {
-            buffer.set_len(u16_count);
-        }
-    }
-
-    CStr16::from_str_with_buf(str, buffer.as_slice_mut()).map_err(Into::into)
-}
-
-/// Various errors that can occur when converting a [`str`] to a [`CStr16`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToCStr16Error {
-    /// An allocation failure occurred.
-    AllocationFailure(TryAllocateError),
-    /// An string conversion error occurred.
-    StringError(FromStrWithBufError),
-}
-
-impl From<TryAllocateError> for ToCStr16Error {
-    fn from(value: TryAllocateError) -> Self {
-        ToCStr16Error::AllocationFailure(value)
-    }
-}
-
-impl From<FromStrWithBufError> for ToCStr16Error {
-    fn from(value: FromStrWithBufError) -> Self {
-        ToCStr16Error::StringError(value)
-    }
-}
-
-impl Display for ToCStr16Error {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            ToCStr16Error::AllocationFailure(err) => write!(f, "allocation error: {err}"),
-            ToCStr16Error::StringError(err) => write!(f, "string conversion error: {err}"),
         }
     }
 }

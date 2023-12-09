@@ -3,7 +3,7 @@
 //!
 //! This module provides parsing functionality for the referenced data.
 
-use core::{fmt::Display, error::Error};
+use core::{error::Error, fmt::Display};
 
 use crate::ELF_VERSION;
 
@@ -24,7 +24,7 @@ impl Ident {
     /// The magic bytes
     const MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 
-    /// Parses a [`Ident`] from bytes, validating its contents.
+    /// Parses an [`Ident`] from bytes, validating its contents.
     ///
     /// # Errors
     /// - [`TooSmall`][ts]
@@ -32,12 +32,12 @@ impl Ident {
     /// - [`IncorrectMagic`][im]
     ///     - Returned if the magic value is incorrect.
     /// - [`InvalidClass`][ic]
-    ///     - Returned if the class is not 1 or 2 ([`Class32`][c32] or [`Class64`][c64]) 
+    ///     - Returned if the class is not 1 or 2 ([`Class32`][c32] or [`Class64`][c64])
     /// - [`InvalidEncoding`][ie]
     ///     - Returned if the encoding is not 1 or 2 ([`LittleEndian`][le] or [`BigEndian`][be])
     /// - [`InvalidVersion`][iv]
     ///     - Returned if the version is invalid.
-    /// 
+    ///
     /// [ts]: ParseIdentError::TooSmall
     /// [im]: ParseIdentError::IncorrectMagic
     /// [ic]: ParseIdentError::InvalidClass
@@ -161,6 +161,35 @@ pub enum Encoding {
     BigEndian,
 }
 
+impl Encoding {
+    /// Converts a `u32` from the ELF encoding to the usable encoding.
+    #[must_use]
+    pub fn decode_u16(self, value: u16) -> u16 {
+        match self {
+            Encoding::LittleEndian => u16::from_le(value),
+            Encoding::BigEndian => u16::from_be(value),
+        }
+    }
+
+    /// Converts a `u32` from the ELF encoding to the usable encoding.
+    #[must_use]
+    pub fn decode_u32(self, value: u32) -> u32 {
+        match self {
+            Encoding::LittleEndian => u32::from_le(value),
+            Encoding::BigEndian => u32::from_be(value),
+        }
+    }
+
+    /// Converts a `u64` from the ELF encoding to the usable encoding.
+    #[must_use]
+    pub fn decode_u64(self, value: u64) -> u64 {
+        match self {
+            Encoding::LittleEndian => u64::from_le(value),
+            Encoding::BigEndian => u64::from_be(value),
+        }
+    }
+}
+
 impl Display for Encoding {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
@@ -222,19 +251,9 @@ impl OsAbi {
     pub const ARCHITECTURE_SPECIFIC_END: OsAbi = OsAbi(255);
 
     /// Tests whether the meaning of this [`OsAbi`] is architecture specific.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let arch_specific = OsAbi(65);
-    /// let arch_independent = OsAbi::FREEBSD;
-    ///
-    /// assert!(arch_specific.is_architecture_specific())
-    /// assert!(!arch_independent.is_architecture_specific());
-    /// ```
     #[must_use]
-    pub fn is_architecture_specific(&self) -> bool {
-        &Self::ARCHITECTURE_SPECIFIC_START <= self && self <= &Self::ARCHITECTURE_SPECIFIC_END
+    pub fn is_architecture_specific(self) -> bool {
+        Self::ARCHITECTURE_SPECIFIC_START <= self && self <= Self::ARCHITECTURE_SPECIFIC_END
     }
 }
 

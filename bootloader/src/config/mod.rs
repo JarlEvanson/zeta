@@ -22,6 +22,8 @@ pub struct Config {
     pub logging: LoggingFilters,
     /// Information regarding the kernel file and the requested modules to load.
     pub kernel: Kernel,
+    /// Information regarding the initial program the kernel will execute.
+    pub init: Init,
     /// Information regarding the known modules.
     pub modules: Vec<Module>,
     /// Storage for all parsed UTF-8 strings.
@@ -51,6 +53,17 @@ pub struct Kernel {
     /// SHA-512 digest of kernel executable file.
     pub checksum: Digest,
     /// Arguments to be passed to the kernel.
+    pub args: Vec<StringHandle>,
+}
+
+/// Information regarding the initial program the kernel will execute.
+#[derive(Debug)]
+pub struct Init {
+    /// Path to initial executable file.
+    pub path: PathHandle,
+    /// SHA-512 digest of initial executable file.
+    pub checksum: Digest,
+    /// Arguments to be passed to the initial process.
     pub args: Vec<StringHandle>,
 }
 

@@ -14,7 +14,7 @@ use crate::{config::parser::lexer::Lexer, vec::Vec};
 use self::lexer::{Token, TokenKind};
 use self::strings::{MultiplexedStringIterator, StringLike};
 
-use super::{Config, PathStorage};
+use super::{Config, Init, PathStorage};
 
 mod impls;
 mod lexer;
@@ -35,6 +35,10 @@ struct ConfigState<'config> {
     kernel_declared: OnceCell<()>,
     kernel: KernelState<'config>,
 
+    // Init table settings
+    init_declared: OnceCell<()>,
+    init: InitState<'config>,
+
     // Module table settings
     modules_declared: OnceCell<()>,
     modules: Vec<ModuleState<'config>>,
@@ -51,6 +55,14 @@ struct LoggingState {
 #[allow(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Default)]
 struct KernelState<'config> {
+    path: OnceCell<MultiplexedStringIterator<'config>>,
+    checksum: OnceCell<Digest>,
+    args: OnceCell<Vec<MultiplexedStringIterator<'config>>>,
+}
+
+#[allow(clippy::missing_docs_in_private_items)]
+#[derive(Debug, Default)]
+struct InitState<'config> {
     path: OnceCell<MultiplexedStringIterator<'config>>,
     checksum: OnceCell<Digest>,
     args: OnceCell<Vec<MultiplexedStringIterator<'config>>>,
@@ -81,48 +93,8 @@ pub fn parse_configuration_file(toml_str: &str) -> Result<Config, ParseConfigErr
 
     let logging = convert_logging(&table.logging);
 
-    let kernel = {
-        let path = if let Some(path) = table.kernel.path.get() {
-            if path.clone().count() == 0 {
-                return Err(ParseConfigError::UnsetMustSet);
-            }
-
-            paths.add_path_from_chars(path.clone()).unwrap()
-        } else {
-            log::error!("`kernel.path` must be set");
-
-            return Err(ParseConfigError::UnsetMustSet);
-        };
-
-        let Some(checksum) = table.kernel.checksum.get().copied() else {
-            log::error!("`kernel.path` must be set");
-
-            return Err(ParseConfigError::UnsetMustSet);
-        };
-
-        let parsed_args = if let Some(args) = table.kernel.args.get_mut() {
-            let mut tmp = Vec::new();
-
-            core::mem::swap(&mut tmp, args);
-
-            tmp
-        } else {
-            Vec::new()
-        };
-
-        let mut args = Vec::with_capacity(parsed_args.len()).unwrap();
-
-        for arg in parsed_args.as_slice() {
-            args.push_within_capacity(strings.add_str_from_chars(arg.clone()).unwrap())
-                .unwrap();
-        }
-
-        Kernel {
-            path,
-            checksum,
-            args,
-        }
-    };
+    let kernel = convert_kernel(&mut table.kernel, &mut paths, &mut strings)?;
+    let init = convert_init(&mut table.init, &mut paths, &mut strings)?;
 
     let mut modules = Vec::with_capacity(table.modules.len()).unwrap();
 
@@ -174,6 +146,7 @@ pub fn parse_configuration_file(toml_str: &str) -> Result<Config, ParseConfigErr
         randomize_memory,
         logging,
         kernel,
+        init,
         modules,
         strings,
         paths,
@@ -197,6 +170,106 @@ fn convert_logging(state: &LoggingState) -> LoggingFilters {
         serial,
         framebuffer,
     }
+}
+
+/// Converts a [`KernelState`] into a [`Kernel`].
+fn convert_kernel(
+    kernel: &mut KernelState,
+    paths: &mut PathStorage,
+    strings: &mut StringStorage,
+) -> Result<Kernel, ParseConfigError> {
+    let path = if let Some(path) = kernel.path.get() {
+        if path.clone().count() == 0 {
+            return Err(ParseConfigError::UnsetMustSet);
+        }
+
+        paths.add_path_from_chars(path.clone()).unwrap()
+    } else {
+        log::error!("`kernel.path` must be set");
+
+        return Err(ParseConfigError::UnsetMustSet);
+    };
+
+    let Some(checksum) = kernel.checksum.get().copied() else {
+        log::error!("`kernel.path` must be set");
+
+        return Err(ParseConfigError::UnsetMustSet);
+    };
+
+    let parsed_args = if let Some(args) = kernel.args.get_mut() {
+        let mut tmp = Vec::new();
+
+        core::mem::swap(&mut tmp, args);
+
+        tmp
+    } else {
+        Vec::new()
+    };
+
+    let mut args = Vec::with_capacity(parsed_args.len()).unwrap();
+
+    for arg in parsed_args.as_slice() {
+        args.push_within_capacity(strings.add_str_from_chars(arg.clone()).unwrap())
+            .unwrap();
+    }
+
+    let kernel = Kernel {
+        path,
+        checksum,
+        args,
+    };
+
+    Ok(kernel)
+}
+
+/// Converts a [`InitState`] into a [`Init`].
+fn convert_init(
+    init: &mut InitState,
+    paths: &mut PathStorage,
+    strings: &mut StringStorage,
+) -> Result<Init, ParseConfigError> {
+    let path = if let Some(path) = init.path.get() {
+        if path.clone().count() == 0 {
+            return Err(ParseConfigError::UnsetMustSet);
+        }
+
+        paths.add_path_from_chars(path.clone()).unwrap()
+    } else {
+        log::error!("`kernel.path` must be set");
+
+        return Err(ParseConfigError::UnsetMustSet);
+    };
+
+    let Some(checksum) = init.checksum.get().copied() else {
+        log::error!("`kernel.path` must be set");
+
+        return Err(ParseConfigError::UnsetMustSet);
+    };
+
+    let parsed_args = if let Some(args) = init.args.get_mut() {
+        let mut tmp = Vec::new();
+
+        core::mem::swap(&mut tmp, args);
+
+        tmp
+    } else {
+        Vec::new()
+    };
+
+    let mut args = Vec::with_capacity(parsed_args.len()).unwrap();
+
+    for arg in parsed_args.as_slice() {
+        args.push_within_capacity(strings.add_str_from_chars(arg.clone()).unwrap())
+            .unwrap();
+    }
+
+    let init = Init {
+        path,
+        checksum,
+        args,
+    };
+
+    Ok(init)
 }
 
 impl<'config> ConfigParser<'config> {
@@ -358,6 +431,14 @@ impl<'config> ConfigParser<'config> {
                 .set(())
                 .map_err(|()| SetTableError::AlreadyDeclared(Table::Kernel))?;
             self.current_table = Table::Kernel;
+        } else if key.eq("init") {
+            log::trace!("moving to the init table");
+
+            self.toml_state
+                .init_declared
+                .set(())
+                .map_err(|()| SetTableError::AlreadyDeclared(Table::Kernel))?;
+            self.current_table = Table::Init;
         } else {
             log::error!("`{}` is not a valid table", key);
             return Err(SetTableError::InvalidTable);
@@ -384,6 +465,7 @@ impl<'config> ConfigParser<'config> {
             Table::Global => self.parse_global_key(key),
             Table::Logging => self.parse_logging_key(key),
             Table::Kernel => self.parse_kernel_key(key),
+            Table::Init => self.parse_init_key(key),
             Table::Modules => self.parse_module_key(key),
         }
     }
@@ -435,6 +517,28 @@ impl<'config> ConfigParser<'config> {
                     match token.kind {
                         TokenKind::BareString(key) => self.parse_kernel_key(&key),
                         TokenKind::BasicString(key) => self.parse_kernel_key(&key),
+                        _ => return Err(SetKeyError::InvalidFormat(token)),
+                    }?;
+                }
+                TokenKind::Equals => {
+                    todo!("implement inline tables");
+                }
+                _ => return Err(SetKeyError::InvalidFormat(token)),
+            }
+        } else if key.eq("init") {
+            self.lexer.skip_whitespace();
+
+            let token = self.lexer.next();
+
+            match token.kind {
+                TokenKind::Dot => {
+                    let _ = self.toml_state.init_declared.set(());
+
+                    let token = self.lexer.next();
+
+                    match token.kind {
+                        TokenKind::BareString(key) => self.parse_init_key(&key),
+                        TokenKind::BasicString(key) => self.parse_init_key(&key),
                         _ => return Err(SetKeyError::InvalidFormat(token)),
                     }?;
                 }
@@ -529,6 +633,37 @@ impl<'config> ConfigParser<'config> {
         Ok(())
     }
 
+    /// Function to control parsing of the kernel table.
+    fn parse_init_key(&mut self, key: &dyn StringLike) -> Result<(), SetKeyError> {
+        if key.eq("path") {
+            log::trace!("setting `init.path`");
+
+            if let Err(err) = set(&mut self.lexer, &self.toml_state.init.path) {
+                log::error!("error setting `init.path`: {err}");
+                return Err(err.into());
+            }
+        } else if key.eq("checksum") {
+            log::trace!("setting `init.checksum`");
+
+            if let Err(err) = set(&mut self.lexer, &self.toml_state.init.checksum) {
+                log::error!("error setting `init.checksum`: {err}");
+                return Err(err.into());
+            }
+        } else if key.eq("args") {
+            log::trace!("setting `init.args`");
+
+            if let Err(err) = set_array(&mut self.lexer, &self.toml_state.init.args) {
+                log::error!("error setting `init.args`: {err}");
+                return Err(err.into());
+            }
+        } else {
+            log::error!("`{}` is not a valid key for the init table", key);
+            return Err(SetKeyError::InvalidKey);
+        }
+
+        Ok(())
+    }
+
     /// Function to control parsing of a module table.
     fn parse_module_key(&mut self, key: &dyn StringLike) -> Result<(), SetKeyError> {
         let module = self.toml_state.modules.as_slice_mut().last().unwrap();
@@ -606,6 +741,8 @@ enum Table {
     Logging,
     /// The table controlling the kernel.
     Kernel,
+    /// The table controlling the initial program.
+    Init,
     /// Tables controlling their respective module.
     Modules,
 }
@@ -616,6 +753,7 @@ impl Display for Table {
             Table::Global => f.write_str("global"),
             Table::Logging => f.write_str("logging"),
             Table::Kernel => f.write_str("kernel"),
+            Table::Init => f.write_str("init"),
             Table::Modules => f.write_str("modules"),
         }
     }

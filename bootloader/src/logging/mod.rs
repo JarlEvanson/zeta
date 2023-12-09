@@ -160,6 +160,15 @@ pub fn initialize() -> Result<(), SetupLoggingError> {
     Ok(())
 }
 
+/// Deinitializes logging using UEFI protocols.
+pub fn prepare_to_exit_boot_services() {
+    // SAFETY:
+    // UEFI is single threaded, so `SerialState` is safe to access.
+    let mut serial = unsafe { SERIAL_STATE.lock() };
+
+    *serial = SerialState::Uninitialized;
+}
+
 /// Attempts to acquire a serial output.
 ///
 /// # Errors

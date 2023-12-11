@@ -41,6 +41,7 @@ impl<'buffer> Framebuffer<'buffer> {
     }
 
     /// Returns information regarding the layout of the [`Framebuffer`].
+    #[must_use]
     pub fn info(&self) -> Info {
         self.info
     }
@@ -97,29 +98,29 @@ impl<'buffer> Framebuffer<'buffer> {
 
     /// Fills the pixels contained in `rectangle` with `color`.
     #[must_use]
-    pub fn fill(&mut self, color: Color, rectangle: Rectangle) -> Option<()> {
-        if let Some(max_x) = rectangle.top_left.x.checked_add(rectangle.width) {
-            if max_x > self.info.width() {
-                return None;
-            }
-        }
-
-        if let Some(max_height) = rectangle.top_left.y.checked_add(rectangle.height) {
-            if max_height > self.info.height() {
-                return None;
-            }
-        }
-
+    pub fn fill(&mut self, rectangle: Rectangle, color: Color) -> Option<()> {
         if rectangle.width == 0 || rectangle.height == 0 {
             return None;
         }
+
+        rectangle
+            .top_left
+            .x
+            .checked_add(rectangle.width)
+            .filter(|&max_x| max_x <= self.info.width())?;
+        rectangle
+            .top_left
+            .y
+            .checked_add(rectangle.height)
+            .filter(|&max_y| max_y <= self.info.height())?;
+
         // SAFETY:
-        // - `rectange.top_left.x + rectangle.width > self.info().width()`.
-        // - `rectange.top_left.y + rectangle.height > self.info().height()`.
+        // - `rectange.top_left.x + rectangle.width <= self.info().width()`.
+        // - `rectange.top_left.y + rectangle.height <= self.info().height()`.
         // - `rectange.width != 0`.
         // - `rectange.height != 0`.
         unsafe {
-            self.fill_unchecked(color, rectangle);
+            self.fill_unchecked(rectangle, color);
         }
 
         Some(())
@@ -128,13 +129,13 @@ impl<'buffer> Framebuffer<'buffer> {
     /// Fills the pixels contained in `rectangle` with `color`.
     ///
     /// # Safety
-    /// - `rectange.top_left.x + rectangle.width > self.info().width()`.
-    /// - `rectange.top_left.y + rectangle.height > self.info().height()`.
+    /// - `rectange.top_left.x + rectangle.width <= self.info().width()`.
+    /// - `rectange.top_left.y + rectangle.height <= self.info().height()`.
     /// - `rectange.width != 0`.
     /// - `rectange.height != 0`.
     #[expect(clippy::multiple_unsafe_ops_per_block)]
     #[expect(clippy::undocumented_unsafe_blocks)]
-    pub unsafe fn fill_unchecked(&mut self, color: Color, rectangle: Rectangle) {
+    pub unsafe fn fill_unchecked(&mut self, rectangle: Rectangle, color: Color) {
         let block_stride = {
             let block_pixel_stride = self.info.stride() - rectangle.width;
 
@@ -184,6 +185,129 @@ impl<'buffer> Framebuffer<'buffer> {
             r.write_volatile(color.r);
             g.write_volatile(color.g);
             b.write_volatile(color.b);
+        }
+    }
+
+    /// Copys the pixels contained in `src` to the equivalently sized rectangle
+    /// with its top-left corner at `dest`.
+    ///
+    /// Copies from top to bottom, left to right.
+    #[must_use]
+    pub fn copy_within(&mut self, src: Rectangle, dest: PixelCoordinates) -> Option<()> {
+        if src.width == 0 || src.height == 0 {
+            return None;
+        }
+
+        src.top_left
+            .x
+            .checked_add(src.width)
+            .filter(|&max_x| max_x <= self.info.width())?;
+        src.top_left
+            .y
+            .checked_add(src.height)
+            .filter(|&max_y| max_y <= self.info.height())?;
+        dest.x
+            .checked_add(src.width)
+            .filter(|&max_x| max_x <= self.info.width())?;
+        dest.y
+            .checked_add(src.height)
+            .filter(|&max_y| max_y <= self.info.height())?;
+
+        // SAFETY:
+        // - `src.top_left.x + rectangle.width <= self.info().width()`.
+        // - `src.top_left.y + rectangle.height <= self.info().height()`.
+        // - `dest.x + rectangle.width <= self.info().width()`.
+        // - `dest.y + rectangle.height <= self.info().height()`.
+        // - `rectange.width != 0`.
+        // - `rectange.height != 0`.
+        unsafe {
+            self.copy_within_unchecked(src, dest);
+        }
+
+        Some(())
+    }
+
+    /// Copys the pixels contained in `src` to the equivalently sized rectangle
+    /// with its top-left corner at `dest`.
+    ///
+    /// Copies from top to bottom, left to right.
+    ///
+    /// # Safety
+    /// - `src.top_left.x + rectangle.width <= self.info().width()`.
+    /// - `src.top_left.y + rectangle.height <= self.info().height()`.
+    /// - `dest.x + rectangle.width <= self.info().width()`.
+    /// - `dest.y + rectangle.height <= self.info().height()`.
+    /// - `rectange.width != 0`.
+    /// - `rectange.height != 0`.
+    #[expect(clippy::multiple_unsafe_ops_per_block)]
+    #[expect(clippy::undocumented_unsafe_blocks)]
+    unsafe fn copy_within_unchecked(&mut self, src: Rectangle, dest: PixelCoordinates) {
+        let block_stride = {
+            let block_pixel_stride = self.info.stride() - src.width;
+
+            block_pixel_stride * self.info.bytes_per_pixel()
+        };
+
+        // SAFETY:
+        // - `src.top_left.x` is less than `self.info().width()`.
+        // - `src.top_left.y` is less than `self.info().height()`.
+        let (mut src_r, mut src_g, mut src_b) = unsafe { self.setup_rgb_pointers(src.top_left) };
+
+        // SAFETY:
+        // - `dest.x` is less than `self.info().width()`.
+        // - `dest.y` is less than `self.info().height()`.
+        let (mut dest_r, mut dest_g, mut dest_b) = unsafe { self.setup_rgb_pointers(dest) };
+
+        for _ in 0..(src.height - 1) {
+            for _ in 0..(src.width) {
+                unsafe {
+                    dest_r.write_volatile(src_r.read_volatile());
+                    dest_g.write_volatile(src_g.read_volatile());
+                    dest_b.write_volatile(src_b.read_volatile());
+                }
+                unsafe {
+                    src_r = src_r.add(self.info.bytes_per_pixel());
+                    src_g = src_g.add(self.info.bytes_per_pixel());
+                    src_b = src_b.add(self.info.bytes_per_pixel());
+
+                    dest_r = dest_r.add(self.info.bytes_per_pixel());
+                    dest_g = dest_g.add(self.info.bytes_per_pixel());
+                    dest_b = dest_b.add(self.info.bytes_per_pixel());
+                };
+            }
+
+            unsafe {
+                src_r = src_r.add(block_stride);
+                src_g = src_g.add(block_stride);
+                src_b = src_b.add(block_stride);
+
+                dest_r = dest_r.add(block_stride);
+                dest_g = dest_g.add(block_stride);
+                dest_b = dest_b.add(block_stride);
+            }
+        }
+
+        for _ in 0..(src.width - 1) {
+            unsafe {
+                dest_r.write_volatile(src_r.read_volatile());
+                dest_g.write_volatile(src_g.read_volatile());
+                dest_b.write_volatile(src_b.read_volatile());
+            }
+            unsafe {
+                src_r = src_r.add(self.info.bytes_per_pixel());
+                src_g = src_g.add(self.info.bytes_per_pixel());
+                src_b = src_b.add(self.info.bytes_per_pixel());
+
+                dest_r = dest_r.add(self.info.bytes_per_pixel());
+                dest_g = dest_g.add(self.info.bytes_per_pixel());
+                dest_b = dest_b.add(self.info.bytes_per_pixel());
+            };
+        }
+
+        unsafe {
+            dest_r.write_volatile(src_r.read_volatile());
+            dest_g.write_volatile(src_g.read_volatile());
+            dest_b.write_volatile(src_b.read_volatile());
         }
     }
 

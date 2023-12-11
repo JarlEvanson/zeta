@@ -244,16 +244,25 @@ fn init_framebuffer() -> LoggingResult<InitFramebufferError> {
         };
 
         let _ = framebuffer.fill(
-            Color {
-                r: 0x00,
-                g: 0xFF,
-                b: 0x00,
-            },
             Rectangle {
                 top_left: PixelCoordinates { x: 0, y: 0 },
                 width: 400,
                 height: 400,
             },
+            Color {
+                r: 0x00,
+                g: 0xFF,
+                b: 0x00,
+            },
+        );
+
+        let _ = framebuffer.copy_within(
+            Rectangle {
+                top_left: PixelCoordinates { x: 0, y: 0 },
+                width: 400,
+                height: 400,
+            },
+            PixelCoordinates { x: 400, y: 400 },
         );
 
         FRAMEBUFFER_FILTER.store(PRECONFIG_FRAMEBUFFER, Ordering::Relaxed);

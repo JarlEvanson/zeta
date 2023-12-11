@@ -20,7 +20,7 @@ use uefi::{
 
 use crate::{
     config::parse_configuration_file,
-    logging::{set_global_filter, set_serial_filter},
+    logging::{set_framebuffer_filter, set_global_filter, set_serial_filter},
     vec::Vec,
 };
 
@@ -41,7 +41,7 @@ const CONFIG_PATH: &CStr16 = uefi::cstr16!("zeta\\config.toml");
 #[export_name = "digest"]
 #[link_section = ".config"]
 static CONFIG_DIGEST: Digest = match Digest::from_str(
-    "127659b5e77f07463e804d87c7d3d1649db56d1ef90cdd2e5c09993fc5222897334155603e8f2c68b8ec6cc16893137fbde979dae64d5fe9d8a3d9195a9252fb"
+    "cf5630143de2f453c7758a5977676d485ecbf10ac44af0dee37e36e0c072330e1667ed146adb4ab3015bbe2198560047b07a7dd5e32377cc11dca5fd2d2b3996"
 ) {
     Some(digest) => digest,
     None => panic!("invalid digest"),
@@ -52,12 +52,8 @@ const ERROR_STALL_TIME: usize = 10_000_000;
 
 #[uefi_macros::entry]
 fn main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
-    match logging::initialize() {
-        Ok(()) => log::info!(target: "logging", "logging initialized"),
-        Err(_err) => {
-            acquire_boot_handle().stall(ERROR_STALL_TIME);
-            return Status::ABORTED;
-        }
+    if let Err(err) = logging::initialize() {
+        return err;
     }
 
     let mut root_dir = match acquire_boot_partition_root_directory() {
@@ -106,6 +102,7 @@ fn main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
 
     set_global_filter(config.logging.global);
     set_serial_filter(config.logging.serial);
+    set_framebuffer_filter(config.logging.framebuffer);
 
     let kernel_path = config.paths.lookup(config.kernel.path);
     log::info!("loading kernel file from {}", kernel_path);
@@ -144,6 +141,8 @@ fn main(image_handle: Handle, system_table: SystemTable<Boot>) -> Status {
         assert!(modules.push_within_capacity(module_bytes).is_ok());
     }
     log::info!(target: "filesystem", "all modules loaded");
+
+    logging::prepare_to_exit_boot_services();
 
     loop {
         core::hint::spin_loop();

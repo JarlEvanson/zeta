@@ -27,6 +27,8 @@ use crate::{
 mod config;
 mod filesystem;
 mod logging;
+#[cfg_attr(not(feature = "framebuffer_logging"), expect(unused))]
+mod terminal;
 mod vec;
 
 /// The default logging level.

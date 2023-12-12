@@ -101,6 +101,10 @@ impl<'buffer, 'font> Terminal<'buffer, 'font> {
 
         Ok(terminal)
     }
+    /// Returns access to the underlying framebuffer.
+    pub fn framebuffer(&self) -> &Framebuffer<'buffer> {
+        &self.framebuffer
+    }
 
     /// Returns the number of glyph lines are in the framebuffer.
     pub fn line_count(&self) -> usize {

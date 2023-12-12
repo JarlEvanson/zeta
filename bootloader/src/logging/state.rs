@@ -228,10 +228,25 @@ fn init_framebuffer() -> LoggingResult<InitFramebufferError> {
             core::slice::from_raw_parts_mut(framebuffer.as_mut_ptr(), framebuffer.size())
         };
 
-        let Some(framebuffer) = Framebuffer::new(framebuffer_slice, info) else {
+        let Some(visible_buffer) = Framebuffer::new(framebuffer_slice, info) else {
             return LoggingResult::Err(InitFramebufferError::InvalidInfo(
                 ValidateInfoError::IllegalBufferSize {
                     actual: framebuffer.size(),
+                    minimum: info.size(),
+                },
+            ));
+        };
+
+        let mut vec = crate::vec::Vec::with_capacity(visible_buffer.info().size()).unwrap();
+        vec.spare_capacity_mut()
+            .fill(core::mem::MaybeUninit::new(0));
+        unsafe { vec.set_len(vec.capacity()) }
+        let (vec, _) = vec.leak();
+
+        let Some(framebuffer) = Framebuffer::new(vec, info) else {
+            return LoggingResult::Err(InitFramebufferError::InvalidInfo(
+                ValidateInfoError::IllegalBufferSize {
+                    actual: visible_buffer.info().size(),
                     minimum: info.size(),
                 },
             ));
@@ -261,7 +276,7 @@ fn init_framebuffer() -> LoggingResult<InitFramebufferError> {
         // UEFI is single threaded, so `SerialState` is safe to access.
         let mut framebuffer_state = unsafe { FRAMEBUFFER_STATE.lock() };
 
-        *framebuffer_state = FramebufferState::Terminal(terminal);
+        *framebuffer_state = FramebufferState::Terminal(terminal, visible_buffer);
 
         FRAMEBUFFER_FILTER.store(PRECONFIG_FRAMEBUFFER, Ordering::Relaxed);
 
@@ -363,7 +378,7 @@ pub(super) enum FramebufferState {
     /// Can occur both before setting up logging and after boot services are exited.
     Uninitialized,
     /// Protocol setup.
-    Terminal(Terminal<'static, 'static>),
+    Terminal(Terminal<'static, 'static>, Framebuffer<'static>),
 }
 
 /// Various errors that can occur while initializing framebuffer logging.

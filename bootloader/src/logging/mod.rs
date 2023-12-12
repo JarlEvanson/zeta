@@ -101,7 +101,18 @@ fn log_framebuffer(record: &log::Record) {
 
     match &mut *guard {
         FramebufferState::Uninitialized => {}
-        FramebufferState::Terminal(terminal) => log(terminal, record),
+        FramebufferState::Terminal(terminal, visible_buffer) => {
+            log(terminal, record);
+            let _ = visible_buffer.copy_from_framebuffer(
+                terminal.framebuffer(),
+                crate::terminal::Rectangle {
+                    top_left: crate::terminal::PixelCoordinates { x: 0, y: 0 },
+                    width: terminal.framebuffer().info().width(),
+                    height: terminal.framebuffer().info().height(),
+                },
+                crate::terminal::PixelCoordinates { x: 0, y: 0 },
+            );
+        }
     }
 }
 

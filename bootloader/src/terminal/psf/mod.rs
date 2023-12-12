@@ -3,6 +3,8 @@
 
 mod glyph;
 
+use core::fmt::Debug;
+
 pub use glyph::*;
 
 /// Bytes containing a PC Screen Font version 2.
@@ -281,7 +283,6 @@ impl ProbeSeq {
 }
 
 /// A PC Screen Font.
-#[derive(Debug)]
 pub struct Font<'font> {
     /// The data of the glyphs.
     glyphs: &'font [u8],
@@ -322,6 +323,11 @@ impl<'font> Font<'font> {
         }
     }
 
+    /// Returns the number of glyphs in the [`Font`].
+    pub fn glyph_count(&self) -> usize {
+        self.glyphs.len() / (self.bytes_per_glyph as usize)
+    }
+
     /// Returns the width of each [`Glyph`] in pixels.
     pub fn glyph_width(&self) -> usize {
         self.glyph_width
@@ -330,6 +336,19 @@ impl<'font> Font<'font> {
     /// Returns the height of each [`Glyph`] in pixels.
     pub fn glyph_height(&self) -> usize {
         self.glyph_height
+    }
+}
+
+impl Debug for Font<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let mut dstruct = f.debug_struct("Font");
+
+        dstruct.field("glyph_count", &self.glyph_count());
+        dstruct.field("bytes_per_glyph", &self.bytes_per_glyph);
+        dstruct.field("glyph_width", &self.glyph_width);
+        dstruct.field("glyph_height", &self.glyph_height);
+
+        dstruct.finish_non_exhaustive()
     }
 }
 

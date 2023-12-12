@@ -1,6 +1,6 @@
 use crate::{
     logging::{preconfig::PRECONFIG_GLOBAL, Logger},
-    terminal::info::ValidateInfoError,
+    terminal::{info::ValidateInfoError, CreateTerminalError, Terminal},
 };
 
 #[cfg(any(feature = "serial_logging", feature = "framebuffer_logging"))]
@@ -21,7 +21,7 @@ use crate::{
     terminal::{
         framebuffer::Framebuffer,
         info::{Info, PixelFormat},
-        Color, PixelCoordinates, Rectangle,
+        Color,
     },
 };
 #[cfg(feature = "framebuffer_logging")]
@@ -31,12 +31,24 @@ use uefi::proto::console::gop::GraphicsOutput;
 #[cfg(feature = "serial_logging")]
 static mut SERIAL_STATE: Mutex<SerialState> = Mutex::new(SerialState::Uninitialized);
 
+/// The state of the serial output for logging.
+#[cfg(feature = "framebuffer_logging")]
+static mut FRAMEBUFFER_STATE: Mutex<FramebufferState> = Mutex::new(FramebufferState::Uninitialized);
+
 /// Gets the state of the serial logging method.
 #[cfg(feature = "serial_logging")]
 pub(super) fn serial_logger() -> MutexGuard<'static, SerialState> {
     // SAFETY:
-    // UEFI is single threaded, so `SerialState` is safe to access.
+    // UEFI is single threaded, so `SERIAL_STATE` is safe to access.
     unsafe { SERIAL_STATE.lock() }
+}
+
+/// Gets the state of the framebuffer logging method.
+#[cfg(feature = "framebuffer_logging")]
+pub(super) fn terminal_logger() -> MutexGuard<'static, FramebufferState> {
+    // SAFETY:
+    // UEFI is single threaded, so `FRAMEBUFFER_STATE` is safe to access.
+    unsafe { FRAMEBUFFER_STATE.lock() }
 }
 
 /// Initializes the logging framework, setting the filters to the corresponding [`LevelFilter`]
@@ -171,12 +183,7 @@ fn init_framebuffer() -> LoggingResult<InitFramebufferError> {
     {
         use uefi::proto::console::gop;
 
-        let mut gop = match acquire_gop() {
-            Ok(gop) => gop,
-            Err(err) => {
-                return LoggingResult::Err(InitFramebufferError::UefiError(err));
-            }
-        };
+        let mut gop = acquire_gop().map_err(Into::into)?;
 
         let mode = gop
             .modes()
@@ -196,13 +203,6 @@ fn init_framebuffer() -> LoggingResult<InitFramebufferError> {
             return LoggingResult::Err(InitFramebufferError::UefiError(err));
         }
 
-        gop.blt(uefi::proto::console::gop::BltOp::VideoFill {
-            color: uefi::proto::console::gop::BltPixel::new(0xFF, 0, 0),
-            dest: (0, 0),
-            dims: (200, 200),
-        })
-        .unwrap();
-
         let info = gop.current_mode_info();
         let mut framebuffer = gop.frame_buffer();
 
@@ -219,14 +219,8 @@ fn init_framebuffer() -> LoggingResult<InitFramebufferError> {
             },
             4,
             info.stride(),
-        );
-
-        let info = match info {
-            Ok(info) => info,
-            Err(err) => {
-                return LoggingResult::Err(InitFramebufferError::InvalidInfo(err));
-            }
-        };
+        )
+        .map_err(Into::into)?;
 
         // SAFETY:
         // UEFI says that this is a valid buffer.
@@ -234,7 +228,7 @@ fn init_framebuffer() -> LoggingResult<InitFramebufferError> {
             core::slice::from_raw_parts_mut(framebuffer.as_mut_ptr(), framebuffer.size())
         };
 
-        let Some(mut framebuffer) = Framebuffer::new(framebuffer_slice, info) else {
+        let Some(framebuffer) = Framebuffer::new(framebuffer_slice, info) else {
             return LoggingResult::Err(InitFramebufferError::InvalidInfo(
                 ValidateInfoError::IllegalBufferSize {
                     actual: framebuffer.size(),
@@ -243,27 +237,31 @@ fn init_framebuffer() -> LoggingResult<InitFramebufferError> {
             ));
         };
 
-        let _ = framebuffer.fill(
-            Rectangle {
-                top_left: PixelCoordinates { x: 0, y: 0 },
-                width: 400,
-                height: 400,
+        let terminal = Terminal::new(
+            framebuffer,
+            crate::terminal::psf::FONT,
+            crate::terminal::Formatting {
+                padding: crate::terminal::BorderPadding::default(),
+                spacing: crate::terminal::Spacing::default(),
             },
             Color {
                 r: 0x00,
                 g: 0xFF,
                 b: 0x00,
             },
-        );
-
-        let _ = framebuffer.copy_within(
-            Rectangle {
-                top_left: PixelCoordinates { x: 0, y: 0 },
-                width: 400,
-                height: 400,
+            Color {
+                r: 0x00,
+                g: 0x00,
+                b: 0x00,
             },
-            PixelCoordinates { x: 400, y: 400 },
-        );
+        )
+        .map_err(Into::into)?;
+
+        // SAFETY:
+        // UEFI is single threaded, so `SerialState` is safe to access.
+        let mut framebuffer_state = unsafe { FRAMEBUFFER_STATE.lock() };
+
+        *framebuffer_state = FramebufferState::Terminal(terminal);
 
         FRAMEBUFFER_FILTER.store(PRECONFIG_FRAMEBUFFER, Ordering::Relaxed);
 
@@ -294,21 +292,30 @@ pub enum LoggingResult<E> {
     /// Logging successfully initialized.
     #[cfg_attr(
         not(any(feature = "serial_logging", feature = "framebuffer_logging")),
-        allow(unused)
+        expect(unused)
     )]
     Ok,
     /// Indicates the logging method is disabled.
     #[cfg_attr(
         all(feature = "serial_logging", feature = "framebuffer_logging"),
-        allow(unused)
+        expect(unused)
     )]
     Disabled,
     /// Contains the error value.
     #[cfg_attr(
         not(any(feature = "serial_logging", feature = "framebuffer_logging")),
-        allow(unused)
+        expect(unused)
     )]
     Err(E),
+}
+
+impl<E> core::ops::FromResidual<Result<core::convert::Infallible, E>> for LoggingResult<E> {
+    fn from_residual(residual: Result<core::convert::Infallible, E>) -> Self {
+        match residual {
+            Ok(_) => Self::Ok,
+            Err(err) => Self::Err(err),
+        }
+    }
 }
 
 /// Attempts to acquire a serial output protocol.
@@ -337,8 +344,8 @@ fn acquire_gop() -> Result<ScopedProtocol<'static, GraphicsOutput>, uefi::Error>
     open_protocol_exclusive::<GraphicsOutput>(handle)
 }
 
-#[cfg(feature = "serial_logging")]
 /// The state of the serial logging facility.
+#[cfg(feature = "serial_logging")]
 pub(super) enum SerialState {
     /// Uninitialized.
     ///
@@ -346,6 +353,17 @@ pub(super) enum SerialState {
     Uninitialized,
     /// Protocol setup.
     Proto(ScopedProtocol<'static, Serial>),
+}
+
+/// The state of the graphical logging facility.
+#[cfg(feature = "framebuffer_logging")]
+pub(super) enum FramebufferState {
+    /// Uninitialized.
+    ///
+    /// Can occur both before setting up logging and after boot services are exited.
+    Uninitialized,
+    /// Protocol setup.
+    Terminal(Terminal<'static, 'static>),
 }
 
 /// Various errors that can occur while initializing framebuffer logging.
@@ -358,4 +376,24 @@ pub enum InitFramebufferError {
     UnsupportedFormat(uefi::proto::console::gop::PixelFormat),
     /// An error occurred during validation of framebuffer info.
     InvalidInfo(ValidateInfoError),
+    /// An error occurred while creating a [`Terminal`].
+    TerminalFailure(CreateTerminalError),
+}
+
+impl From<ValidateInfoError> for InitFramebufferError {
+    fn from(value: ValidateInfoError) -> Self {
+        Self::InvalidInfo(value)
+    }
+}
+
+impl From<uefi::Error> for InitFramebufferError {
+    fn from(value: uefi::Error) -> Self {
+        Self::UefiError(value)
+    }
+}
+
+impl From<CreateTerminalError> for InitFramebufferError {
+    fn from(value: CreateTerminalError) -> Self {
+        Self::TerminalFailure(value)
+    }
 }

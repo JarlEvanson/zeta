@@ -10,6 +10,7 @@ use super::{
 
 /// Representation of a writable framebuffer. Contains all the information
 /// needed to safely write to a buffer.
+#[derive(Debug)]
 pub struct Framebuffer<'buffer> {
     /// Pointer to the top-left corner of the framebuffer.
     ptr: *mut u8,
@@ -94,6 +95,19 @@ impl<'buffer> Framebuffer<'buffer> {
         unsafe {
             b.write_volatile(color.b);
         }
+    }
+
+    /// Clears the framebuffer, filling the entire framebuffer with `color`.
+    pub fn clear(&mut self, color: Color) {
+        self.fill(
+            Rectangle {
+                top_left: PixelCoordinates { x: 0, y: 0 },
+                width: self.info.width(),
+                height: self.info.height(),
+            },
+            color,
+        )
+        .unwrap();
     }
 
     /// Fills the pixels contained in `rectangle` with `color`.

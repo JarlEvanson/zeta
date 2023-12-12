@@ -97,7 +97,12 @@ fn log_framebuffer(record: &log::Record) {
         return;
     }
 
-    let _ = core::hint::black_box(8);
+    let mut guard = terminal_logger();
+
+    match &mut *guard {
+        FramebufferState::Uninitialized => {}
+        FramebufferState::Terminal(terminal) => log(terminal, record),
+    }
 }
 
 #[cfg(any(feature = "serial_logging", feature = "framebuffer_logging"))]

@@ -7,7 +7,12 @@
     maybe_uninit_slice,
     strict_provenance,
     error_in_core,
-    debug_closure_helpers
+    debug_closure_helpers,
+    core_intrinsics,
+    const_heap,
+    const_slice_from_raw_parts_mut,
+    const_ptr_write,
+    try_trait_v2
 )]
 
 use digest::sha512::Digest;

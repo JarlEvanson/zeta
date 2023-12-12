@@ -202,7 +202,7 @@ impl<'buffer> Framebuffer<'buffer> {
         }
     }
 
-    /// Copys the pixels contained in `src` to the equivalently sized rectangle
+    /// Copies the pixels contained in `src` to the equivalently sized rectangle
     /// with its top-left corner at `dest`.
     ///
     /// Copies from top to bottom, left to right.
@@ -241,16 +241,16 @@ impl<'buffer> Framebuffer<'buffer> {
         Some(())
     }
 
-    /// Copys the pixels contained in `src` to the equivalently sized rectangle
+    /// Copies the pixels contained in `src` to the equivalently sized rectangle
     /// with its top-left corner at `dest`.
     ///
     /// Copies from top to bottom, left to right.
     ///
     /// # Safety
-    /// - `src.top_left.x + rectangle.width <= self.info().width()`.
-    /// - `src.top_left.y + rectangle.height <= self.info().height()`.
-    /// - `dest.x + rectangle.width <= self.info().width()`.
-    /// - `dest.y + rectangle.height <= self.info().height()`.
+    /// - `src.top_left.x + src.width <= self.info().width()`.
+    /// - `src.top_left.y + src.height <= self.info().height()`.
+    /// - `dest.x + src.width <= self.info().width()`.
+    /// - `dest.y + src.height <= self.info().height()`.
     /// - `rectange.width != 0`.
     /// - `rectange.height != 0`.
     #[expect(clippy::multiple_unsafe_ops_per_block)]
@@ -302,6 +302,154 @@ impl<'buffer> Framebuffer<'buffer> {
         }
 
         for _ in 0..(src.width - 1) {
+            unsafe {
+                dest_r.write_volatile(src_r.read_volatile());
+                dest_g.write_volatile(src_g.read_volatile());
+                dest_b.write_volatile(src_b.read_volatile());
+            }
+            unsafe {
+                src_r = src_r.add(self.info.bytes_per_pixel());
+                src_g = src_g.add(self.info.bytes_per_pixel());
+                src_b = src_b.add(self.info.bytes_per_pixel());
+
+                dest_r = dest_r.add(self.info.bytes_per_pixel());
+                dest_g = dest_g.add(self.info.bytes_per_pixel());
+                dest_b = dest_b.add(self.info.bytes_per_pixel());
+            };
+        }
+
+        unsafe {
+            dest_r.write_volatile(src_r.read_volatile());
+            dest_g.write_volatile(src_g.read_volatile());
+            dest_b.write_volatile(src_b.read_volatile());
+        }
+    }
+
+    /// Copies the pixels contained in `src_rect` from the `src` framebuffer to the
+    /// equivalently sized rectangle located at `dest` in `self`.
+    ///
+    /// Copies from top to bottom, left to right.
+    #[must_use]
+    pub fn copy_from_framebuffer(
+        &mut self,
+        src: &Framebuffer,
+        src_rect: Rectangle,
+        dest: PixelCoordinates,
+    ) -> Option<()> {
+        if src_rect.width == 0 || src_rect.height == 0 {
+            return None;
+        }
+
+        src_rect
+            .top_left
+            .x
+            .checked_add(src_rect.width)
+            .filter(|&max_x| max_x <= src.info.width())?;
+        src_rect
+            .top_left
+            .y
+            .checked_add(src_rect.height)
+            .filter(|&max_y| max_y <= src.info.height())?;
+        dest.x
+            .checked_add(src_rect.width)
+            .filter(|&max_x| max_x <= self.info.width())?;
+        dest.y
+            .checked_add(src_rect.height)
+            .filter(|&max_y| max_y <= self.info.height())?;
+
+        // SAFETY:
+        // - `src.top_left.x + rectangle.width <= self.info().width()`.
+        // - `src.top_left.y + rectangle.height <= self.info().height()`.
+        // - `dest.x + rectangle.width <= self.info().width()`.
+        // - `dest.y + rectangle.height <= self.info().height()`.
+        // - `rectange.width != 0`.
+        // - `rectange.height != 0`.
+        unsafe {
+            self.copy_from_framebuffer_unchecked(src, src_rect, dest);
+        }
+
+        Some(())
+    }
+
+    /// Copies the pixels contained in `src_rect` from the `src` framebuffer to the
+    /// equivalently sized rectangle located at `dest` in `self`.
+    ///
+    /// Copies from top to bottom, left to right.
+    ///
+    /// # Safety
+    /// - `src_rect.top_left.x + src_rect.width <= src.info().width()`.
+    /// - `src_rect.top_left.y + src_rect.height <= src.info().height()`.
+    /// - `dest.x + src_rect.width <= self.info().width()`.
+    /// - `dest.y + src_rect.height <= self.info().height()`.
+    /// - `src_rect.width != 0`.
+    /// - `src_rect.height != 0`.
+    #[expect(clippy::multiple_unsafe_ops_per_block)]
+    #[expect(clippy::undocumented_unsafe_blocks)]
+    unsafe fn copy_from_framebuffer_unchecked(
+        &mut self,
+        src: &Framebuffer,
+        src_rect: Rectangle,
+        dest: PixelCoordinates,
+    ) {
+        let width = src_rect.width;
+        let height = src_rect.height;
+
+        let src_block_stride = {
+            let block_pixel_stride = src.info().stride() - width;
+
+            block_pixel_stride * src.info().bytes_per_pixel()
+        };
+
+        let dest_block_stride = {
+            let block_pixel_stride = self.info().stride() - width;
+
+            block_pixel_stride * self.info().bytes_per_pixel()
+        };
+
+        let (mut src_r, mut src_g, mut src_b) = unsafe {
+            src.setup_rgb_pointers(PixelCoordinates {
+                x: src_rect.top_left.x,
+                y: src_rect.top_left.y,
+            })
+        };
+
+        let (mut dest_r, mut dest_g, mut dest_b) = unsafe {
+            self.setup_rgb_pointers(PixelCoordinates {
+                x: dest.x,
+                y: dest.y,
+            })
+        };
+
+        for _ in 0..(height - 1) {
+            for _ in 0..(width) {
+                unsafe {
+                    dest_r.write_volatile(src_r.read_volatile());
+                    dest_g.write_volatile(src_g.read_volatile());
+                    dest_b.write_volatile(src_b.read_volatile());
+                }
+                unsafe {
+                    src_r = src_r.add(self.info.bytes_per_pixel());
+                    src_g = src_g.add(self.info.bytes_per_pixel());
+                    src_b = src_b.add(self.info.bytes_per_pixel());
+
+                    dest_r = dest_r.add(self.info.bytes_per_pixel());
+                    dest_g = dest_g.add(self.info.bytes_per_pixel());
+                    dest_b = dest_b.add(self.info.bytes_per_pixel());
+                };
+            }
+
+            unsafe {
+                src_r = src_r.add(src_block_stride);
+                src_g = src_g.add(src_block_stride);
+                src_b = src_b.add(src_block_stride);
+
+                dest_r = dest_r.add(dest_block_stride);
+                dest_g = dest_g.add(dest_block_stride);
+                dest_b = dest_b.add(dest_block_stride);
+            }
+        }
+
+        for _ in 0..(width - 1) {
             unsafe {
                 dest_r.write_volatile(src_r.read_volatile());
                 dest_g.write_volatile(src_g.read_volatile());

@@ -698,17 +698,26 @@ impl<'config> ConfigParser<'config> {
     }
 }
 
+/// Various errors that can occur while parsing a config file.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ParseConfigError {
+    /// An error in the lexer occurred.
     LexingError,
+    /// A key that was not set has no reasonable default value,
+    /// so it must be set.
     UnsetMustSet,
 }
 
+/// Various errors that can occur while setting a key.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SetKeyError<'config> {
+    /// The specified key is invalid.
     InvalidKey,
+    /// The key-value assignment was in an invalid format.
     InvalidFormat(Token<'config>),
+    /// The value provided was invalid for the given key.
     InvalidValue,
+    /// The key has already been set.
     AlreadySet,
 }
 
@@ -722,10 +731,14 @@ impl<'config, E: Error> From<SetValueError<'config, E>> for SetKeyError<'config>
     }
 }
 
+/// Various errors that can occur while parsing a module header.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParseModuleHeaderError<'config> {
+    /// The module has already been declared.
     AlreadyDeclared,
+    /// The format of the header was in an invalid format.
     InvalidFormat(Token<'config>),
+    /// The selected table was not a valid table.
     InvalidTable,
 }
 

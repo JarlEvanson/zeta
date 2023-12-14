@@ -1,3 +1,5 @@
+//! Initialization and control of the two logging methods.
+
 use crate::{
     logging::{preconfig::PRECONFIG_GLOBAL, Logger},
     terminal::{info::ValidateInfoError, CreateTerminalError, Terminal},
@@ -240,7 +242,11 @@ fn init_framebuffer() -> LoggingResult<InitFramebufferError> {
         let mut vec = crate::vec::Vec::with_capacity(visible_buffer.info().size()).unwrap();
         vec.spare_capacity_mut()
             .fill(core::mem::MaybeUninit::new(0));
+
+        // SAFETY:
+        // Filled unused capacity with zeros.
         unsafe { vec.set_len(vec.capacity()) }
+
         let (vec, _) = vec.leak();
 
         let Some(framebuffer) = Framebuffer::new(vec, info) else {
@@ -276,7 +282,11 @@ fn init_framebuffer() -> LoggingResult<InitFramebufferError> {
         // UEFI is single threaded, so `SerialState` is safe to access.
         let mut framebuffer_state = unsafe { FRAMEBUFFER_STATE.lock() };
 
-        *framebuffer_state = FramebufferState::Terminal(terminal, visible_buffer);
+        *framebuffer_state = FramebufferState::UefiTerminal {
+            handle: gop,
+            terminal,
+            framebuffer: visible_buffer,
+        };
 
         FRAMEBUFFER_FILTER.store(PRECONFIG_FRAMEBUFFER, Ordering::Relaxed);
 
@@ -293,10 +303,38 @@ pub fn prepare_to_exit_boot_services() {
     #[cfg(feature = "serial_logging")]
     {
         // SAFETY:
-        // UEFI is single threaded, so `SerialState` is safe to access.
+        // UEFI is single threaded, so `SERIAL_STATE` is safe to access.
         let mut serial = unsafe { SERIAL_STATE.lock() };
 
         *serial = SerialState::Uninitialized;
+    }
+    #[cfg(feature = "framebuffer_logging")]
+    {
+        // SAFETY:
+        // UEFI is single threaded, so `FRAMEBUFFER_STATE` is safe to access.
+        let mut framebuffer_state = unsafe { FRAMEBUFFER_STATE.lock() };
+
+        let mut tmp = FramebufferState::Uninitialized;
+
+        core::mem::swap(&mut *framebuffer_state, &mut tmp);
+
+        match tmp {
+            FramebufferState::Uninitialized => {}
+            FramebufferState::UefiTerminal {
+                handle: _,
+                terminal,
+                framebuffer,
+            }
+            | FramebufferState::Terminal {
+                terminal,
+                framebuffer,
+            } => {
+                *framebuffer_state = FramebufferState::Terminal {
+                    terminal,
+                    framebuffer,
+                };
+            }
+        }
     }
 }
 
@@ -377,8 +415,23 @@ pub(super) enum FramebufferState {
     ///
     /// Can occur both before setting up logging and after boot services are exited.
     Uninitialized,
-    /// Protocol setup.
-    Terminal(Terminal<'static, 'static>, Framebuffer<'static>),
+    /// Framebuffer setup and have not exited UEFI.
+    UefiTerminal {
+        /// Maintain this handle to keep exclusive access to GOP.
+        #[expect(dead_code)]
+        handle: ScopedProtocol<'static, GraphicsOutput>,
+        /// The RAM terminal for faster writing.
+        terminal: Terminal<'static, 'static>,
+        /// The display buffer.
+        framebuffer: Framebuffer<'static>,
+    },
+    /// Framebuffer setup and have exited UEFI.
+    Terminal {
+        /// The RAM terminal for faster writing.
+        terminal: Terminal<'static, 'static>,
+        /// The display buffer.
+        framebuffer: Framebuffer<'static>,
+    },
 }
 
 /// Various errors that can occur while initializing framebuffer logging.

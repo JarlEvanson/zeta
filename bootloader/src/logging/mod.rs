@@ -101,9 +101,17 @@ fn log_framebuffer(record: &log::Record) {
 
     match &mut *guard {
         FramebufferState::Uninitialized => {}
-        FramebufferState::Terminal(terminal, visible_buffer) => {
+        FramebufferState::UefiTerminal {
+            handle: _,
+            terminal,
+            framebuffer,
+        }
+        | FramebufferState::Terminal {
+            terminal,
+            framebuffer,
+        } => {
             log(terminal, record);
-            let _ = visible_buffer.copy_from_framebuffer(
+            let _ = framebuffer.copy_from_framebuffer(
                 terminal.framebuffer(),
                 crate::terminal::Rectangle {
                     top_left: crate::terminal::PixelCoordinates { x: 0, y: 0 },

@@ -5,7 +5,7 @@ use core::{
     error::Error,
     fmt::{Debug, Display},
     marker::PhantomData,
-    mem::{self, MaybeUninit, ManuallyDrop},
+    mem::{self, ManuallyDrop, MaybeUninit},
     ptr::NonNull,
 };
 
@@ -280,7 +280,7 @@ impl<T> Vec<T> {
     /// Returns a slice pointing to the initialized elements that `self` holds.
     #[must_use]
     pub fn leak(self) -> (&'static mut [T], usize) {
-        let vec = ManuallyDrop::new(self);
+        let mut vec = ManuallyDrop::new(self);
 
         let slice = if let Some(ptr) = vec.get_aligned_ptr() {
             // SAFETY:
@@ -291,13 +291,16 @@ impl<T> Vec<T> {
             &mut []
         };
 
+        // Drop the boot handle.
+        vec.allocated = Allocated::Unallocated;
+
         (slice, vec.capacity)
     }
 
     /// Returns a slice pointing to the buffer that `self` had.
     #[must_use]
     pub fn leak_maybe_uninit(self) -> (&'static mut [MaybeUninit<T>], usize) {
-        let vec = ManuallyDrop::new(self);
+        let mut vec = ManuallyDrop::new(self);
 
         let slice = if let Some(ptr) = vec.get_aligned_ptr() {
             // SAFETY:
@@ -311,6 +314,9 @@ impl<T> Vec<T> {
             &mut []
         };
 
+        // Drop the boot handle.
+        vec.allocated = Allocated::Unallocated;
+
         (slice, vec.capacity)
     }
 
@@ -320,12 +326,13 @@ impl<T> Vec<T> {
     /// `ptr` must first be aligned up, and then `ptr` can be treated as a ptr to the start of a slice.
     #[must_use]
     pub fn into_raw_parts(self) -> (Option<NonNull<T>>, usize, usize) {
-        let vec = ManuallyDrop::new(self);
+        let mut vec = ManuallyDrop::new(self);
 
         let capacity = vec.capacity;
         let len = vec.len;
 
         if let Allocated::Allocated { ptr, handle: _ } = vec.allocated {
+            vec.allocated = Allocated::Unallocated;
             (Some(ptr), capacity, len)
         } else {
             (None, capacity, len)

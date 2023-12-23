@@ -5,6 +5,9 @@ use crate::{
     terminal::{info::ValidateInfoError, CreateTerminalError, Terminal},
 };
 
+use core::fmt::Write;
+use uefi::system::with_stderr;
+
 #[cfg(any(feature = "serial_logging", feature = "framebuffer_logging"))]
 use core::sync::atomic::Ordering;
 #[cfg(any(feature = "serial_logging", feature = "framebuffer_logging"))]
@@ -72,7 +75,6 @@ pub fn initialize() -> Result<(), uefi::Status> {
     log::set_logger(&Logger).expect("logger can only be set once");
 
     let serial_result = init_serial();
-
     let framebuffer_result = init_framebuffer();
 
     match (serial_result, framebuffer_result) {
@@ -83,9 +85,6 @@ pub fn initialize() -> Result<(), uefi::Status> {
             log::info!(target: "logging", "logging initialized");
         }
         (LoggingResult::Err(serial_err), LoggingResult::Disabled) => {
-            use core::fmt::Write;
-            use uefi::system::with_stderr;
-
             let handle = acquire_boot_handle();
 
             // Last ditch effort to give useful data to the user.
@@ -103,9 +102,6 @@ pub fn initialize() -> Result<(), uefi::Status> {
             return Err(Status::ABORTED);
         }
         (LoggingResult::Disabled, LoggingResult::Err(framebuffer_err)) => {
-            use core::fmt::Write;
-            use uefi::system::with_stderr;
-
             let handle = acquire_boot_handle();
 
             // Last ditch effort to give useful data to the user.
@@ -123,9 +119,6 @@ pub fn initialize() -> Result<(), uefi::Status> {
             return Err(Status::ABORTED);
         }
         (LoggingResult::Err(serial_err), LoggingResult::Err(framebuffer_err)) => {
-            use core::fmt::Write;
-            use uefi::system::with_stderr;
-
             let handle = acquire_boot_handle();
 
             // Last ditch effort to give useful data to the user.
@@ -142,7 +135,12 @@ pub fn initialize() -> Result<(), uefi::Status> {
             handle.stall(ERROR_STALL_TIME);
             return Err(Status::ABORTED);
         }
-        _ => todo!(),
+        (LoggingResult::Err(serial_err), LoggingResult::Ok) => {
+            log::error!("serial initialization failed: {serial_err:?}")
+        }
+        (LoggingResult::Ok, LoggingResult::Err(framebuffer_err)) => {
+            log::error!("framebuffer initialization failed: {framebuffer_err:?}")
+        }
     }
 
     Ok(())

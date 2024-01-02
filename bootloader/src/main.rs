@@ -12,7 +12,8 @@
     const_heap,
     const_slice_from_raw_parts_mut,
     const_ptr_write,
-    try_trait_v2
+    try_trait_v2,
+    non_null_convenience
 )]
 
 use digest::sha512::Digest;
@@ -29,6 +30,7 @@ use crate::{
     vec::Vec,
 };
 
+mod arena;
 mod config;
 mod filesystem;
 mod logging;

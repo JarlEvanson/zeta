@@ -34,9 +34,12 @@ impl Sha512 {
         }
     }
 
-    pub fn hash_single(mut message: &[u8]) -> Digest {
+    /// A convenience function that returns the [`Sha512`] [`Digest`] of a single `message`.
+    pub fn hash(message: &[u8]) -> Digest {
         /// A static assertion that the message cannot overflow the bit counter.
         const ASSERTION: usize = (usize::BITS < 128) as usize - 1;
+
+        core::hint::black_box(ASSERTION);
 
         let mut hasher = Sha512::default();
 

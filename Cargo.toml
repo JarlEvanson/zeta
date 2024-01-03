@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["bootloader", "digest", "elf", "sync"]
-
+members = ["bootloader", "digest", "elf", "sync", "xtask"]
 
 [workspace.package]
 authors = ["Jarl Evanson <evanson.jarl@gmail.com"]
@@ -25,3 +24,6 @@ missing_docs_in_private_items = "warn"
 [workspace.lints.rust]
 missing_docs = "warn"
 
+[profile.release]
+lto = true
+overflow-checks = true

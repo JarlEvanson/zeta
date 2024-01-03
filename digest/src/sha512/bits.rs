@@ -34,6 +34,17 @@ impl Sha512 {
         }
     }
 
+    pub fn hash_single(mut message: &[u8], bit_count: u128) -> Result<Digest, UpdateBitsError> {
+        /// A static assertion that the message cannot overflow the bit counter.
+        const ASSERTION: usize = (usize::BITS < 128) as usize - 1;
+
+        let mut hasher = Sha512::default();
+
+        hasher.update(message, bit_count)?;
+
+        Ok(hasher.finalize())
+    }
+
     /// Adds `bit_count` bits from `message` to the hash.
     ///
     /// Does not check if the bit representation is canonical.

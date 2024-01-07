@@ -15,7 +15,7 @@ mkdir -p $RUN_BASE/EFI/BOOT
 
 cp target/x86_64-unknown-uefi/release/bootloader.efi $RUN_BASE/EFI/BOOT/BOOTX64.EFI
 
-cargo run --package xtask
+cargo xtask update-checksum $1 $2
 
 mkdir -p $TEST_BASE/outputs
 

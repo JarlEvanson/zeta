@@ -35,6 +35,9 @@ impl Sha512 {
     }
 
     /// A convenience function that returns the [`Sha512`] [`Digest`] of a single `message`.
+    ///
+    /// # Errors
+    /// Returns an error if the total number of bits hashed by the function would overflow a u128.
     pub fn hash(message: &[u8], bit_count: u128) -> Result<Digest, UpdateBitsError> {
         /// A static assertion that the message cannot overflow the bit counter.
         const ASSERTION: usize = (usize::BITS < 128) as usize - 1;

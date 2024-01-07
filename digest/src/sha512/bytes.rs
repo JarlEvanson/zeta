@@ -35,6 +35,11 @@ impl Sha512 {
     }
 
     /// A convenience function that returns the [`Sha512`] [`Digest`] of a single `message`.
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "compile-time assertion prevents error condition"
+    )]
     pub fn hash(message: &[u8]) -> Digest {
         /// A static assertion that the message cannot overflow the bit counter.
         const ASSERTION: usize = (usize::BITS < 128) as usize - 1;

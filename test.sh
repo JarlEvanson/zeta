@@ -11,9 +11,9 @@ export PRE_CONFIG_FRAMEBUFFER="trace"
 
 cargo build --bin bootloader --target x86_64-unknown-uefi --release
 
-mkdir -p $RUN_BASE/EFI/BOOT
+mkdir -p $RUN_BASE/efi/boot
 
-cp target/x86_64-unknown-uefi/release/bootloader.efi $RUN_BASE/EFI/BOOT/BOOTX64.EFI
+cp target/x86_64-unknown-uefi/release/bootloader.efi $RUN_BASE/efi/boot/BOOTX64.EFI
 
 cargo xtask update-checksum $1 $2
 

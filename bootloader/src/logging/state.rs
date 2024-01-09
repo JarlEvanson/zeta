@@ -136,10 +136,10 @@ pub fn initialize() -> Result<(), uefi::Status> {
             return Err(Status::ABORTED);
         }
         (LoggingResult::Err(serial_err), LoggingResult::Ok) => {
-            log::error!("serial initialization failed: {serial_err:?}")
+            log::error!("serial initialization failed: {serial_err:?}");
         }
         (LoggingResult::Ok, LoggingResult::Err(framebuffer_err)) => {
-            log::error!("framebuffer initialization failed: {framebuffer_err:?}")
+            log::error!("framebuffer initialization failed: {framebuffer_err:?}");
         }
     }
 

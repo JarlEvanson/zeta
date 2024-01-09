@@ -4,7 +4,7 @@ use core::{fmt::Display, mem::MaybeUninit};
 
 use digest::sha512::{bytes::Sha512, Digest};
 use uefi::{
-    boot::acquire_boot_handle,
+    boot::{open_protocol_exclusive, ScopedProtocol},
     data_types::Align,
     proto::{
         loaded_image::LoadedImage,
@@ -13,11 +13,10 @@ use uefi::{
             fs::SimpleFileSystem,
         },
     },
-    table::boot::{OpenProtocolAttributes, OpenProtocolParams},
     CStr16, Status,
 };
 
-use crate::vec::Vec;
+use crate::{arena::Frame, vec::Vec};
 
 /// Acquire the root directory of the boot partition.
 ///
@@ -37,32 +36,14 @@ use crate::vec::Vec;
 ///
 /// [ibm]: [AcquireRootError::InvalidBootMethod]
 /// [iv]: [AcquireRootError::InvalidVolume]
-pub fn acquire_boot_partition_root_directory() -> Result<Directory, AcquireRootError> {
-    let boot_handle = acquire_boot_handle();
-
-    let image_handle = boot_handle.image_handle();
-
-    let open_params = OpenProtocolParams {
-        agent: image_handle,
-        controller: None,
-        handle: image_handle,
-    };
-
-    // SAFETY:
-    // `image_handle` will remain valid until usage ends because this image is `image_handle`.
-    // `image_handle` should always have the `LoadedImage` protocol, since it is a loaded image.
-    let loaded_image = unsafe {
-        boot_handle
-            .open_protocol::<LoadedImage>(open_params, OpenProtocolAttributes::GetProtocol)
-            .expect("`image_handle` must support the `LoadedImage` protocol")
-    };
-
+pub fn acquire_loaded_image_directory(
+    loaded_image: &ScopedProtocol<LoadedImage>,
+) -> Result<Directory, AcquireRootError> {
     let Some(device_handle) = loaded_image.device() else {
         return Err(AcquireRootError::InvalidBootMethod);
     };
 
-    let Ok(mut simple_file_system) =
-        boot_handle.open_protocol_exclusive::<SimpleFileSystem>(device_handle)
+    let Ok(mut simple_file_system) = open_protocol_exclusive::<SimpleFileSystem>(device_handle)
     else {
         return Err(AcquireRootError::InvalidBootMethod);
     };
@@ -75,12 +56,29 @@ pub fn acquire_boot_partition_root_directory() -> Result<Directory, AcquireRootE
 }
 
 /// Various errors that occur when running [`acquire_boot_partition_root_directory`].
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AcquireRootError {
     /// Bootloader was not loaded from a device or bootloader was loaded from a device
     /// that does not support the [`SimpleFileSystem`] protocol.
     InvalidBootMethod,
     /// Opening the volume from which the bootloader image was loaded failed.
     InvalidVolume,
+}
+
+impl Display for AcquireRootError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            AcquireRootError::InvalidBootMethod => {
+                write!(f, "bootloader was loaded using an unsupported method")
+            }
+            AcquireRootError::InvalidVolume => {
+                write!(
+                    f,
+                    "failed to open the volume from which the bootloader was loaded"
+                )
+            }
+        }
+    }
 }
 
 /// Loads a file from the specified [`Directory`] and validates that it matches the digest.
@@ -115,6 +113,7 @@ pub fn load_file(
     directory: &mut Directory,
     path: &CStr16,
     valid_digest: Digest,
+    scratch: &Frame,
 ) -> Result<Vec<u8>, LoadFileError> {
     log::trace!(target: "filesystem", "attempting to load {}", path);
 
@@ -128,7 +127,7 @@ pub fn load_file(
             Status::VOLUME_CORRUPTED => return Err(LoadFileError::VolumeCorrupted),
             Status::ACCESS_DENIED => return Err(LoadFileError::AccessDenied),
             Status::OUT_OF_RESOURCES => return Err(LoadFileError::OutOfResources),
-            general => unreachable!("unexpected error: {:?}", general),
+            unexpected => unreachable!("unexpected error: {:?}", unexpected),
         },
     };
 
@@ -144,7 +143,7 @@ pub fn load_file(
     );
 
     let info_size = match file.get_info::<FileInfo>(&mut []) {
-        Ok(_) => unreachable!(),
+        Ok(_) => unreachable!("`FileInfo` size should never be zero"),
         Err(err) => match err.split() {
             (Status::UNSUPPORTED, _) => return Err(LoadFileError::NotFile),
             (Status::NO_MEDIA | Status::DEVICE_ERROR, _) => return Err(LoadFileError::MediaError),
@@ -156,18 +155,15 @@ pub fn load_file(
         },
     };
 
-    let mut vec = Vec::<u8>::with_capacity(info_size).map_err(|_| LoadFileError::OutOfResources)?;
+    let info = scratch.allocate_slice::<u8>(info_size);
 
-    vec.spare_capacity_mut().fill(MaybeUninit::new(0));
+    info.fill(MaybeUninit::new(0));
 
     // SAFETY:
-    // `vec.capacity()` is less than or equal to `capacity`.
-    // Uninitialized memory has been filled with zeros.
-    unsafe {
-        vec.set_len(vec.capacity());
-    }
+    // `0` is an initialized value of `u8`s.
+    let info = unsafe { MaybeUninit::slice_assume_init_mut(info) };
 
-    let info = match file.get_info::<FileInfo>(vec.as_slice_mut()) {
+    let info = match file.get_info::<FileInfo>(info) {
         Ok(info) => info,
         Err(err) => match err.split() {
             (Status::UNSUPPORTED, _) => return Err(LoadFileError::NotFile),
@@ -180,8 +176,7 @@ pub fn load_file(
     let required_bytes =
         TryInto::<usize>::try_into(info.file_size()).map_err(|_| LoadFileError::OutOfResources)?;
 
-    vec.try_reserve(required_bytes.saturating_sub(vec.len()))
-        .map_err(|_| LoadFileError::OutOfResources)?;
+    let mut vec = Vec::with_capacity(required_bytes).map_err(|_| LoadFileError::OutOfResources)?;
 
     vec.spare_capacity_mut().fill(MaybeUninit::new(0));
 

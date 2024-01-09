@@ -7,6 +7,7 @@ use core::{cell::OnceCell, fmt::Debug};
 use digest::sha512::Digest;
 use log::LevelFilter;
 
+use crate::arena::Frame;
 use crate::config::{Kernel, LoggingFilters, Module, StringStorage};
 use crate::DEFAULT_LOGGING_LEVEL;
 use crate::{config::parser::lexer::Lexer, vec::Vec};
@@ -84,8 +85,11 @@ struct ConfigParser<'config> {
 }
 
 /// Parses [`Config`] from `toml_str`.
-pub fn parse_configuration_file(toml_str: &str) -> Result<Config, ParseConfigError> {
-    let mut table = ConfigParser::parse_configuration_file(toml_str)?;
+pub fn parse_configuration_file(
+    toml_str: &str,
+    frame: &mut Frame,
+) -> Result<Config, ParseConfigError> {
+    let mut table = ConfigParser::parse_configuration_file(toml_str, frame)?;
     let mut strings = StringStorage::new();
     let mut paths = PathStorage::new();
 
@@ -274,7 +278,10 @@ fn convert_init(
 
 impl<'config> ConfigParser<'config> {
     #[allow(clippy::missing_docs_in_private_items)]
-    fn parse_configuration_file(toml_str: &'config str) -> Result<ConfigState, ParseConfigError> {
+    fn parse_configuration_file(
+        toml_str: &'config str,
+        frame: &mut Frame,
+    ) -> Result<ConfigState<'config>, ParseConfigError> {
         let mut parser = ConfigParser {
             current_table: Table::Global,
             lexer: Lexer::new(toml_str),

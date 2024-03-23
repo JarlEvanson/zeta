@@ -1,0 +1,5 @@
+# Ignore rust build directory.
+target/
+
+# Ignore run directory.
+run/

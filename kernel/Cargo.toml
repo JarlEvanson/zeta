@@ -7,7 +7,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-
+limine = "0.2.0"
 
 [lints]
 workspace = true

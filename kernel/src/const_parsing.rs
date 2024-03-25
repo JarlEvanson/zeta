@@ -1,4 +1,4 @@
-//! Helper functions for parsing items from strings. This is meant to be used for compile time 
+//! Helper functions for parsing items from strings. This is meant to be used for compile time
 //! for configuration.
 
 /// Attempts to acquire the environment variable `config_name`, returning `default` if the

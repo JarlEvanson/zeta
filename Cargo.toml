@@ -1,5 +1,5 @@
 [workspace]
-members = ["bootloader", "kernel", "uefi"]
+members = ["kernel"]
 resolver = "2"
 
 [workspace.package]

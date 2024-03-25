@@ -2,7 +2,7 @@
 
 set -e
 
-cp target/x86_64-unknown-none/debug/kernel run/fat_dir/zeta
+cp target/x86_64-unknown-none/release/kernel run/fat_dir/zeta
 
 qemu-system-x86_64 \
     -m 10G \

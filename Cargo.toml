@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = ["kernel"]
+
+[workspace.package]
+authors = ["Jarl Evanson <evanson.jarl@gmail.com"]
+categories = ["no-std", "kernel"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/JarlEvanson/zeta"
+
+[workspace.lints.clippy]
+
+# Safety lints 
+undocumented_unsafe_blocks = "forbid"
+multiple_unsafe_ops_per_block = "deny"
+
+# Documentation lints
+missing_errors_doc = "deny"
+missing_panics_doc = "deny"
+missing_safety_doc = "deny"
+missing_docs_in_private_items = "deny"
+
+[workspace.lints.rust]
+
+# Safety lints
+unsafe_op_in_unsafe_fn = "deny"
+
+# Documentation lints
+missing_docs = "deny"
+
+[workspace.dependencies]

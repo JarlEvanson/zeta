@@ -1,2 +1,5 @@
 # Ignore build directory
 target/
+
+# Ignore the run directory
+run/

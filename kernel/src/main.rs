@@ -4,6 +4,7 @@
 #![no_main]
 
 pub mod arch;
+pub mod cells;
 pub mod utils;
 
 /// Function that handles panics.

@@ -2,24 +2,34 @@
 
 use core::marker::PhantomData;
 
-use crate::utils::u64_to_usize;
+use crate::{cells::ControllledModificationCell, utils::u64_to_usize};
 
 /// The base revision of the Limine boot protocol that this kernel expects to be booted from.
 const BASE_REVISION: u64 = 2;
 
 /// The base revision tag that allows the bootloader to be able to identify the tag and specifies the
 /// [`BASE_REVISION`] that this kernel requires.
-#[export_name = "LIMINE_BASE_REVISION_TAG"]
+#[used]
 #[link_section = ".limine.requests"]
-static BASE_REVISION_TAG: [u64; 3] = [0xf9562b2d5c95a6c8, 0x6a7b384944536bdc, BASE_REVISION];
+static BASE_REVISION_TAG: ControllledModificationCell<[u64; 3]> =
+    ControllledModificationCell::new([0xf9562b2d5c95a6c8, 0x6a7b384944536bdc, BASE_REVISION]);
 
 /// The request that specifies the entry point that the Limine bootloader should use to boot the kernel.
-#[export_name = "LIMINE_ENTRY_POINT_REQUEST"]
+#[used]
 #[link_section = ".limine.requests"]
-static ENTRY_POINT_REQUEST: EntryPointRequest = EntryPointRequest {
-    header: RequestHeader::new(),
-    entry: Some(entry),
-};
+static ENTRY_POINT_REQUEST: ControllledModificationCell<EntryPointRequest> =
+    ControllledModificationCell::new(EntryPointRequest {
+        header: RequestHeader::new(),
+        entry: Some(entry),
+    });
+
+/// The kernel requires knowing the layout of physical memory.
+#[used]
+#[link_section = ".limine.requests"]
+static MEMORY_MAP_REQUEST: ControllledModificationCell<MemoryMapRequest> =
+    ControllledModificationCell::new(MemoryMapRequest {
+        header: RequestHeader::new(),
+    });
 
 /// Entry point for the Limine bootloader.
 ///
@@ -28,7 +38,7 @@ static ENTRY_POINT_REQUEST: EntryPointRequest = EntryPointRequest {
 #[export_name = "LIMINE_ENTRY"]
 #[link_section = ".limine.entry"]
 pub extern "C" fn entry() -> ! {
-    assert!(ENTRY_POINT_REQUEST.header.processed_as_provided());
+    assert!(ENTRY_POINT_REQUEST.get().header.processed_as_provided());
 
     // SAFETY:
     unsafe {
@@ -91,6 +101,12 @@ impl<T: Request> RequestHeader<T> {
     pub const fn processed_as_provided(&self) -> bool {
         self.revision >= T::REVISION
     }
+
+    /// Returns the [`T::Response`] that to which this [`RequestHeader`] points.
+    pub fn response(&self) -> &T::Response {
+        // SAFETY:
+        unsafe { self.response.as_mut().unwrap() }
+    }
 }
 
 /// Limine requests.
@@ -121,9 +137,15 @@ struct ResponseHeader<T: Response> {
 }
 
 impl<T: Response> ResponseHeader<T> {
-    /// Returns the revision of the [`Response`] that the bootloader provided.
-    pub fn revision(&self) -> bool {
+    /// Returns `true` if the revision of the [`Response`] that the bootloader provided
+    /// is compatible with the version this kernel expects.
+    pub fn expected_revision(&self) -> bool {
         self.revision >= T::REVISION
+    }
+
+    /// Returns the revision of the [`Response`] that the bootloader provided.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 }
 
@@ -136,6 +158,7 @@ trait Response {
 }
 
 /// Specifies the entry point that the Limine bootloader should use to boot this kernel.
+#[repr(C)]
 struct EntryPointRequest {
     /// The header for [`EntryPointRequest`].
     header: RequestHeader<EntryPointRequest>,
@@ -151,6 +174,7 @@ impl Request for EntryPointRequest {
 }
 
 /// The response to an [`EntryPointRequest`].
+#[repr(C)]
 struct EntryPointResponse {
     /// The header for [`EntryPointResponse`].
     header: ResponseHeader<EntryPointResponse>,

@@ -4,6 +4,7 @@
 #![no_main]
 
 pub mod arch;
+pub mod utils;
 
 /// Function that handles panics.
 #[panic_handler]

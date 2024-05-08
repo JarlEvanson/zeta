@@ -2,6 +2,8 @@
 
 use core::marker::PhantomData;
 
+use crate::utils::u64_to_usize;
+
 /// The base revision of the Limine boot protocol that this kernel expects to be booted from.
 const BASE_REVISION: u64 = 2;
 
@@ -156,4 +158,62 @@ struct EntryPointResponse {
 
 impl Response for EntryPointResponse {
     const REVISION: u64 = 0;
+}
+
+/// Requests the physical memory map for the system.
+#[repr(C)]
+struct MemoryMapRequest {
+    /// The header for [`MemoryMapRequest`].
+    header: RequestHeader<MemoryMapRequest>,
+}
+
+// SAFETY:
+// All API's provided by [`MemoryMapRequest`] are safe.
+unsafe impl Sync for MemoryMapRequest {}
+
+impl Request for MemoryMapRequest {
+    const MAGIC_3: u64 = 0x67cf3d9d378a806f;
+    const MAGIC_4: u64 = 0xe304acdfc50c3c62;
+    const REVISION: u64 = 0;
+    type Response = MemoryMapResponse;
+}
+
+/// The response to a [`MemoryMapRequest`].
+#[repr(C)]
+struct MemoryMapResponse {
+    /// The header for [`MemoryMapResponse`].
+    header: ResponseHeader<MemoryMapResponse>,
+    /// The number of [`MemoryMapEntry`] structures returned.
+    entry_count: u64,
+    /// Pointer to an array of `entry_count` pointers to [`MemoryMapEntry`] structures.
+    entries: *mut *mut MemoryMapEntry,
+}
+
+impl MemoryMapResponse {
+    /// Returns all the entries in the [`MemoryMapResponse`].
+    pub fn entries(&self) -> &[&MemoryMapEntry] {
+        // SAFETY:
+        // According to the Limine protocol, this should be safe.
+        unsafe {
+            core::slice::from_raw_parts(
+                self.entries.cast::<&MemoryMapEntry>(),
+                u64_to_usize(self.entry_count),
+            )
+        }
+    }
+}
+
+impl Response for MemoryMapResponse {
+    const REVISION: u64 = 0;
+}
+
+/// Structure describing the layout of a single entry in the Limine memory map.
+#[repr(C)]
+struct MemoryMapEntry {
+    /// The base address of the physical memory region described by the [`MemoryMapEntry`].
+    base: u64,
+    /// The size, in bytes, of the physical memory region described by the [`MemoryMapEntry`].
+    length: u64,
+    /// The kind of the physical memory region described by the [`MemoryMapEntry`].
+    kind: u64,
 }

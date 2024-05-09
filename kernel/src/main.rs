@@ -5,6 +5,7 @@
 
 pub mod arch;
 pub mod cells;
+pub mod polyfill;
 pub mod utils;
 
 /// Function that handles panics.

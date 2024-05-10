@@ -6,6 +6,7 @@
 pub mod arch;
 pub mod cells;
 pub mod polyfill;
+pub mod spinlock;
 pub mod utils;
 
 #[cfg(test)]

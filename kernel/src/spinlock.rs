@@ -6,12 +6,78 @@ use core::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+/// The locking component of a [`SpinLock`].
+pub struct RawSpinLock {
+    /// The lock.
+    lock: AtomicBool,
+}
+
+impl RawSpinLock {
+    /// Creates a new [`RawSpinLock`] in the unlocked state.
+    pub const fn new() -> RawSpinLock {
+        RawSpinLock {
+            lock: AtomicBool::new(false),
+        }
+    }
+
+    /// Locks the [`RawSpinLock`], spinning until the lock is acquired.
+    ///
+    /// This function does not return until the lock has been acquired.
+    pub fn lock(&self) {
+        let mut was_locked = self.lock.load(Ordering::Relaxed);
+
+        loop {
+            if !was_locked {
+                match self
+                    .lock
+                    .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                {
+                    Ok(_) => break,
+                    Err(state) => was_locked = state,
+                }
+            }
+
+            core::hint::spin_loop();
+        }
+    }
+
+    /// Attempts to lock the [`RawSpinLock`].
+    ///
+    /// This function does not spin or block.
+    ///
+    /// # Errors
+    /// If the [`RawSpinLock`] was already locked, then this calll will return an [`Err`].
+    pub fn try_lock(&self) -> Result<(), SpinLockAcquisitionError> {
+        if !self.lock.load(Ordering::Relaxed)
+            && self
+                .lock
+                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+        {
+            Ok(())
+        } else {
+            Err(SpinLockAcquisitionError)
+        }
+    }
+
+    /// Method to make unlocking of a mutex more explicit.
+    pub fn unlock(&self) {
+        self.lock.store(false, Ordering::Release);
+    }
+}
+
+impl Default for RawSpinLock {
+    fn default() -> Self {
+        RawSpinLock::new()
+    }
+}
+
 /// A mutual exclusion primitive useful to protecting shared data.
 ///
 /// This mutex will spin waiting for the lock to become available.
 pub struct SpinLock<T: ?Sized> {
     /// The lock.
-    lock: AtomicBool,
+    lock: RawSpinLock,
     /// The value protected by the [`SpinLock`].
     value: UnsafeCell<T>,
 }
@@ -30,7 +96,7 @@ impl<T> SpinLock<T> {
     /// Creates a new [`SpinLock`] in an unlocked state ready for use.
     pub const fn new(value: T) -> SpinLock<T> {
         SpinLock {
-            lock: AtomicBool::new(false),
+            lock: RawSpinLock::new(),
             value: UnsafeCell::new(value),
         }
     }
@@ -47,19 +113,7 @@ impl<T: ?Sized> SpinLock<T> {
     /// This function will spin until it is available to acquire the mutex. Upon returning, the context is the
     /// only context with the lock held. A RAII guard is returned to allow scoped unlock of the lock.
     pub fn lock(&self) -> SpinLockGuard<T> {
-        loop {
-            let was_locked = self.lock.load(Ordering::Relaxed);
-            if !was_locked
-                && self
-                    .lock
-                    .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                    .is_ok()
-            {
-                break;
-            }
-
-            core::hint::spin_loop();
-        }
+        self.lock.lock();
 
         SpinLockGuard { mutex: self }
     }
@@ -73,22 +127,13 @@ impl<T: ?Sized> SpinLock<T> {
     ///
     /// # Errors
     /// If the [`SpinLock`] could not be acquire because it is already locked, then this call will return an [`Err`].
-    pub fn try_lock(&self) -> Result<SpinLockGuard<T>, ()> {
-        if !self.lock.load(Ordering::Relaxed)
-            && self
-                .lock
-                .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-                .is_ok()
-        {
-            return Ok(SpinLockGuard { mutex: self });
-        }
-
-        Err(())
+    pub fn try_lock(&self) -> Result<SpinLockGuard<T>, SpinLockAcquisitionError> {
+        self.lock.try_lock().map(|()| SpinLockGuard { mutex: self })
     }
 
     /// Method that makes unlocking a mutex more explicit.
     pub fn unlock(guard: SpinLockGuard<T>) {
-        drop(guard);
+        guard.mutex.lock.unlock()
     }
 
     /// Returns a mutable reference to the underlying data.
@@ -136,6 +181,10 @@ impl<T: ?Sized> DerefMut for SpinLockGuard<'_, T> {
 
 impl<T: ?Sized> Drop for SpinLockGuard<'_, T> {
     fn drop(&mut self) {
-        self.mutex.lock.store(false, Ordering::Release);
+        self.mutex.lock.unlock();
     }
 }
+
+/// Represents the failure to acquire a spinlock.
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SpinLockAcquisitionError;

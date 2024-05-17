@@ -2,7 +2,12 @@
 
 use core::marker::PhantomData;
 
-use crate::{cells::ControllledModificationCell, utils::u64_to_usize};
+use crate::{
+    cells::ControllledModificationCell,
+    log, log_debug, log_trace,
+    logging::{self, LogFilter, LogLevel},
+    utils::u64_to_usize,
+};
 
 /// The base revision of the Limine boot protocol that this kernel expects to be booted from.
 const BASE_REVISION: u64 = 2;
@@ -35,15 +40,39 @@ static MEMORY_MAP_REQUEST: ControllledModificationCell<MemoryMapRequest> =
 ///
 /// # Panics
 /// If the Limine bootloader utilizes old revisions of the Limine boot protocol.
+#[optimize(size)]
 #[export_name = "LIMINE_ENTRY"]
 #[link_section = ".limine.entry"]
 pub extern "C" fn entry() -> ! {
-    assert!(ENTRY_POINT_REQUEST.get().header.processed_as_provided());
-
     // SAFETY:
-    unsafe {
-        core::arch::asm!("out dx, al", in("dx") 0xe9, in("al") b'e');
+    // Currently, no other ports are used.
+    unsafe { logging::set_logger(crate::arch::x86_64::DebugConLogger::new_mut()) }
+    logging::set_filter(LogFilter::Trace);
+
+    log!(LogLevel::Info, "Booted from Limine boot protocol");
+
+    // Validate fundamental requirements.
+    assert!(BASE_REVISION_TAG.get()[2] == 0);
+    log_trace!("Validated base revision tag");
+    assert!(ENTRY_POINT_REQUEST.get().header.processed_as_provided());
+    log_trace!("Validated entry point response");
+
+    // Start parsing and validating the memory map.
+    assert!(MEMORY_MAP_REQUEST.get().header.processed_as_provided());
+    log_trace!("Validated that the memory map was processed correctly");
+    let memory_map_response = MEMORY_MAP_REQUEST.get().header.response();
+    log_trace!("Acquired memory map response");
+    assert!(memory_map_response.header.expected_revision());
+    log_trace!("Validated understandable revision");
+
+    let entries = memory_map_response.entries();
+
+    for &entry in entries.iter() {
+        log_debug!("Entry: {:#X} {:X} {}", entry.base, entry.length, entry.kind);
+        core::hint::black_box(entry);
     }
+
+    log_trace!("Entering sleep loop");
 
     loop {
         // SAFETY:

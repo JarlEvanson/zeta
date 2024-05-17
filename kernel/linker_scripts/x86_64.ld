@@ -45,7 +45,7 @@ SECTIONS
 
     .dynamic : {
         *(.dynamic)
-    } :dynamic
+    } :dynamic :data
 
     .boot.text ALIGN(CONSTANT(COMMONPAGESIZE)) : {
         KEEP(*(.limine.entry));

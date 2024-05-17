@@ -2,9 +2,11 @@
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
+#![feature(strict_provenance, optimize_attribute)]
 
 pub mod arch;
 pub mod cells;
+pub mod logging;
 pub mod polyfill;
 pub mod spinlock;
 pub mod utils;

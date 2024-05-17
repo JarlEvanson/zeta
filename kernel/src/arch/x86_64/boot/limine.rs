@@ -268,5 +268,48 @@ struct MemoryMapEntry {
     /// The size, in bytes, of the physical memory region described by the [`MemoryMapEntry`].
     length: u64,
     /// The kind of the physical memory region described by the [`MemoryMapEntry`].
-    kind: u64,
+    kind: MemoryMapEntryKind,
+}
+
+/// Various kinds of memory specified by a [`MemoryMapEntry`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct MemoryMapEntryKind(u64);
+
+impl MemoryMapEntryKind {
+    /// Memory that is useful for general use.
+    pub const USABLE: MemoryMapEntryKind = MemoryMapEntryKind(0);
+    /// Memory that is reserved and not for use.
+    pub const RESERVED: MemoryMapEntryKind = MemoryMapEntryKind(1);
+    /// Memory used to store reclaimable ACPI data/code.
+    pub const ACPI_RECLAIMABLE: MemoryMapEntryKind = MemoryMapEntryKind(2);
+    /// Memory that is nonvolatile and used to store ACPI data/code.
+    pub const ACPI_NONVOLATILE: MemoryMapEntryKind = MemoryMapEntryKind(3);
+    /// Memory that is unusable.
+    pub const BAD: MemoryMapEntryKind = MemoryMapEntryKind(4);
+    /// Memory corresponding to reclaimable memory used by the bootloader.
+    pub const BOOTLOADER_RECLAIMABLE: MemoryMapEntryKind = MemoryMapEntryKind(5);
+    /// Memory corresponding to the loaded kernel and modules.
+    pub const KERNEL_AND_MODULES: MemoryMapEntryKind = MemoryMapEntryKind(6);
+    /// Memory corresponding to the framebuffer.
+    pub const FRAMEBUFFER: MemoryMapEntryKind = MemoryMapEntryKind(7);
+}
+
+impl core::fmt::Display for MemoryMapEntryKind {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let output = match *self {
+            Self::USABLE => "Usable",
+            Self::RESERVED => "Reserved",
+            Self::ACPI_RECLAIMABLE => "ACPI Reclaimable",
+            Self::ACPI_NONVOLATILE => "ACPI Nonvolatile",
+            Self::BAD => "Bad",
+            Self::BOOTLOADER_RECLAIMABLE => "Bootloader Reclaimable",
+            Self::KERNEL_AND_MODULES => "Kernel and Modules",
+            Self::FRAMEBUFFER => "Framebuffer",
+            unknown => {
+                return write!(f, "Unknown({})", unknown.0);
+            }
+        };
+
+        f.write_str(output)
+    }
 }

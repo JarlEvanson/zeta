@@ -1,5 +1,6 @@
 //! Definitions and interfaces for interacting with standard UEFI tables.
 
+pub mod boot_services;
 pub mod system;
 
 /// Header that precedes all the standard UEFI table types.

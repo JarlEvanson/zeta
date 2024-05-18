@@ -16,7 +16,9 @@ fn main() {}
 
 /// Function that handles panics.
 #[cfg_attr(not(test), panic_handler)]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    log_fatal!("{}", info);
+
     loop {
         core::hint::spin_loop();
     }

@@ -10,7 +10,7 @@ use crate::{
 };
 
 /// The base revision of the Limine boot protocol that this kernel expects to be booted from.
-const BASE_REVISION: u64 = 2;
+const BASE_REVISION: u64 = 1;
 
 /// The base revision tag that allows the bootloader to be able to identify the tag and specifies the
 /// [`BASE_REVISION`] that this kernel requires.
@@ -67,9 +67,15 @@ pub extern "C" fn entry() -> ! {
 
     let entries = memory_map_response.entries();
 
-    for &entry in entries.iter() {
-        log_debug!("Entry: {:#X} {:X} {}", entry.base, entry.length, entry.kind);
-        core::hint::black_box(entry);
+    for (index, &entry) in entries.iter().enumerate() {
+        log_debug!(
+            "Entry {:02}: {:#13X}-{:#13X} {:13X} {}",
+            index,
+            entry.base,
+            entry.base + entry.length,
+            entry.length,
+            entry.kind
+        );
     }
 
     log_trace!("Entering sleep loop");

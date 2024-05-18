@@ -1,5 +1,7 @@
 //! Definitions and interfaces for interacting with standard UEFI tables.
 
+pub mod system;
+
 /// Header that precedes all the standard UEFI table types.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C)]

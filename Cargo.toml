@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [ "bootloader","kernel"]
+members = ["bootloader","kernel", "uefi"]
 
 [workspace.package]
 authors = ["Jarl Evanson <evanson.jarl@gmail.com"]

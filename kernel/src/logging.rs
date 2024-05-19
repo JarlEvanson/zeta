@@ -1,8 +1,8 @@
 //! Zeta kernel logging.
 
-use core::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use core::sync::atomic::{AtomicU8, Ordering};
 
-use crate::spinlock::{RawSpinLock, SpinLock};
+use crate::spinlock::RawSpinLock;
 
 /// The filter on logging that is currently active.
 static LEVEL_FILTER: AtomicU8 = AtomicU8::new(LogFilter::Off as u8);

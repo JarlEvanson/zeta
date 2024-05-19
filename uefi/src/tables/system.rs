@@ -3,12 +3,12 @@
 use crate::{
     datatypes::{Char16, RawHandle},
     protocols::console::text::SimpleTextOutputProtocol,
-    tables::{Header, TableHeaderValidationError},
+    tables::{boot_services::RawBootServicesTable, Header, TableHeaderValidationError},
 };
 
 /// Container for both the runtime and boot services tables, as well as configuration tables
 /// and the standard input, output, and error protocols and associated [`Handle`]'s.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C)]
 pub struct RawSystemTable {
     /// The [`Header`] used to check validity of this [`RawSystemTable`].
@@ -28,17 +28,17 @@ pub struct RawSystemTable {
     /// The handle for the active console output device.
     pub console_out_handle: RawHandle,
     /// A pointer to the protocol associated with [`RawSystemTable::console_out_handle`].
-    pub console_out: *mut (),
+    pub console_out: *mut SimpleTextOutputProtocol,
 
     /// The handle for the active console error device.
     pub console_err_handle: RawHandle,
     /// A pointer to the protocol associated with [`RawSystemTable::console_err_handle`].
-    pub console_err: *mut (),
+    pub console_err: *mut SimpleTextOutputProtocol,
 
     /// A pointer to the UEFI runtime services table.
     pub runtime_services: *mut (),
     /// A pointer to the UEFI boot services table.
-    pub boot_services: *mut (),
+    pub boot_services: *mut RawBootServicesTable,
 
     /// The number of system configuration tables in the buffer pointed to
     /// by [`RawSystemTable::configuration_tables`].
@@ -52,6 +52,8 @@ impl RawSystemTable {
     pub const SIGNATURE: u64 = 0x5453_5953_2049_4249;
 
     /// Validates that the provided pointer points to a valid UEFI [`RawSystemTable`].
+    ///
+    /// **This does not validate the attached [`RawBootServicesTable`].**
     ///
     /// # Safety
     /// - `ptr` must be valid for reads.

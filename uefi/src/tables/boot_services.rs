@@ -3,7 +3,7 @@
 use crate::tables::{Header, TableHeaderValidationError};
 
 /// A container for function pointers to interact with the UEFI environment.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(C)]
 pub struct RawBootServicesTable {
     /// The [`Header`] used to check validity of this [`RawBootServicesTable`].

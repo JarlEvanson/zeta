@@ -6,6 +6,7 @@
 pub struct RawHandle(pub *mut core::ffi::c_void);
 
 /// A status code returned by UEFI functions.
+#[must_use]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct Status(usize);
@@ -274,6 +275,10 @@ impl CStr16 {
     }
 }
 
+/// Creates a statically allocated [`CStr16`].
+/// 
+/// This panics at runtime if the provided literal cannot be translated into
+/// a [`CStr16`].
 #[macro_export]
 macro_rules! cstr16 {
     ($str: tt) => {{

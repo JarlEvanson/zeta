@@ -21,11 +21,11 @@ impl Status {
 
     /// The string cotained one or more characters that the device could not render
     /// and were skipped.
-    pub const WARN_UNKNOWN_GLYPH: Status = Status(1);    
+    pub const WARN_UNKNOWN_GLYPH: Status = Status(1);
     /// The handle was closed, but the file was not deleted.
-    pub const WARN_DELETE_FAILURE: Status = Status(2); 
+    pub const WARN_DELETE_FAILURE: Status = Status(2);
     /// The handle was closed, but the data to the file was not flushed properly.
-    pub const WARN_WRITE_FAILURE: Status = Status(3); 
+    pub const WARN_WRITE_FAILURE: Status = Status(3);
     /// The resulting buffer was too small, and the data was truncated to the buffer
     /// size.
     pub const WARN_BUFFER_TOO_SMALL: Status = Status(4);
@@ -33,9 +33,9 @@ impl Status {
     /// type of data.
     pub const WARN_STALE_DATA: Status = Status(5);
     /// The resulting buffer contains a UEFI-compliant file system.
-    pub const WARN_FILE_SYSTEM: Status = Status(6); 
+    pub const WARN_FILE_SYSTEM: Status = Status(6);
     /// The operation will be processed across a system reset.
-    pub const WARN_RESET_REQUIRED: Status = Status(1); 
+    pub const WARN_RESET_REQUIRED: Status = Status(1);
 
     // Error codes
 
@@ -276,7 +276,7 @@ impl CStr16 {
 }
 
 /// Creates a statically allocated [`CStr16`].
-/// 
+///
 /// This panics at runtime if the provided literal cannot be translated into
 /// a [`CStr16`].
 #[macro_export]

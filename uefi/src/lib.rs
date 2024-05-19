@@ -3,4 +3,5 @@
 #![no_std]
 
 pub mod datatypes;
+pub mod protocols;
 pub mod tables;

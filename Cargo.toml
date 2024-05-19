@@ -30,3 +30,4 @@ unsafe_op_in_unsafe_fn = "deny"
 missing_docs = "deny"
 
 [workspace.dependencies]
+uefi = { path = "uefi" }

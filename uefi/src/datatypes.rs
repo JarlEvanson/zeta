@@ -360,6 +360,19 @@ macro_rules! cstr16 {
     }};
 }
 
+/// A 128-bit buffer containing an unique identifier value.
+#[repr(C, align(8))]
+pub struct Guid {
+    /// Specifies the first 8 hexadecimal digits of the [`Guid`].
+    pub data1: u32,
+    /// Specifies the first group of 4 hexadecimal digits of the [`Guid`].
+    pub data2: u16,
+    /// Specifies the second group of 4 hexadecimal digits of the [`Guid`].
+    pub data3: u16,
+    /// Specifies the 8 groups of 2 hexadecimal digits of the [`Guid`].
+    pub data4: [u8; 8],
+}
+
 #[cfg(test)]
 mod tests {
     use crate::datatypes::Char16;

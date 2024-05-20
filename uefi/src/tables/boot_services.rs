@@ -10,110 +10,110 @@ pub struct RawBootServicesTable {
     pub header: Header,
 
     /// Raises the task priority level.
-    pub raise_tpl: extern "efiapi" fn(),
+    pub raise_tpl: unsafe extern "efiapi" fn(),
     /// Restores/lowers the task priority level.
-    pub restore_tpl: extern "efiapi" fn(),
+    pub restore_tpl: unsafe extern "efiapi" fn(),
 
     /// Allocates pages of a particular type.
-    pub allocate_pages: extern "efiapi" fn(),
+    pub allocate_pages: unsafe extern "efiapi" fn(),
     /// Frees allocated pages.
-    pub free_pages: extern "efiapi" fn(),
+    pub free_pages: unsafe extern "efiapi" fn(),
     /// Returns the current boot services memory map and memory map key.
-    pub get_memory_map: extern "efiapi" fn(),
+    pub get_memory_map: unsafe extern "efiapi" fn(),
     /// Allocates a pool of a particular type.
-    pub allocate_pool: extern "efiapi" fn(),
+    pub allocate_pool: unsafe extern "efiapi" fn(),
     /// Frees an allocated pool.
-    pub free_pool: extern "efiapi" fn(),
+    pub free_pool: unsafe extern "efiapi" fn(),
 
     /// Creates a general purpose event structure.
-    pub create_event: extern "efiapi" fn(),
+    pub create_event: unsafe extern "efiapi" fn(),
     /// Sets an event to be signaled at a particular time.
-    pub set_timer: extern "efiapi" fn(),
+    pub set_timer: unsafe extern "efiapi" fn(),
     /// Stops execution until an event is signaled.
-    pub wait_for_event: extern "efiapi" fn(),
+    pub wait_for_event: unsafe extern "efiapi" fn(),
     /// Signals an event.
-    pub signal_event: extern "efiapi" fn(),
+    pub signal_event: unsafe extern "efiapi" fn(),
     /// Closes and frees an event structure.
-    pub close_event: extern "efiapi" fn(),
+    pub close_event: unsafe extern "efiapi" fn(),
     /// Checks whether an event is in the signaled state.
-    pub check_event: extern "efiapi" fn(),
+    pub check_event: unsafe extern "efiapi" fn(),
 
     /// Installs a protocol interface on a device handle.
-    pub install_protocol_interface: extern "efiapi" fn(),
+    pub install_protocol_interface: unsafe extern "efiapi" fn(),
     /// Reinstalls a protocol interface on a device handle.
-    pub reinstall_protocol_interface: extern "efiapi" fn(),
+    pub reinstall_protocol_interface: unsafe extern "efiapi" fn(),
     /// Removes a protocol interface from a device handle.
-    pub uninstall_protocol_interface: extern "efiapi" fn(),
+    pub uninstall_protocol_interface: unsafe extern "efiapi" fn(),
     /// Queries a handle to determine if it supports a specified protocol.
-    pub handle_protocol: extern "efiapi" fn(),
+    pub handle_protocol: unsafe extern "efiapi" fn(),
     /// Must be null.
     pub _reserved: *mut (),
     /// Registers an event that is to be signaled whenever an interface is installed for a
     /// specified protocol.
-    pub register_protocol_notify: extern "efiapi" fn(),
+    pub register_protocol_notify: unsafe extern "efiapi" fn(),
     /// Returns an array of handles that support a specified protocol.
-    pub locate_handle: extern "efiapi" fn(),
+    pub locate_handle: unsafe extern "efiapi" fn(),
     /// Locates all devices on a device path that support a specified protocol and returns
     /// the handle ot the device that is closest to the path.
-    pub locate_device_path: extern "efiapi" fn(),
+    pub locate_device_path: unsafe extern "efiapi" fn(),
     /// Adds, updates, or removes a configuration table from the UEFI [`RawSystemTable`][rst].
     ///
     /// [rst]: crate::tables::system::RawSystemTable
-    pub install_configuration_table: extern "efiapi" fn(),
+    pub install_configuration_table: unsafe extern "efiapi" fn(),
 
     /// Loads an EFI image into memory.
-    pub load_image: extern "efiapi" fn(),
+    pub load_image: unsafe extern "efiapi" fn(),
     /// Transfers control to a loaded image's entry point.
-    pub start_image: extern "efiapi" fn(),
+    pub start_image: unsafe extern "efiapi" fn(),
     /// Exits the image's entry point.
-    pub exit: extern "efiapi" fn(),
+    pub exit: unsafe extern "efiapi" fn(),
     /// Unloads an image.
-    pub unload_image: extern "efiapi" fn(),
+    pub unload_image: unsafe extern "efiapi" fn(),
     /// Terminates boot services.
-    pub exit_boot_services: extern "efiapi" fn(),
+    pub exit_boot_services: unsafe extern "efiapi" fn(),
 
     /// Returns a monotonically increasing count for the platform.
-    pub get_next_monotonic_count: extern "efiapi" fn(),
+    pub get_next_monotonic_count: unsafe extern "efiapi" fn(),
     /// Stalls the processor.
-    pub stall: extern "efiapi" fn(),
+    pub stall: unsafe extern "efiapi" fn(),
     /// Resets and sets the watchdog timer used during boot services.
-    pub set_watchdog_timer: extern "efiapi" fn(),
+    pub set_watchdog_timer: unsafe extern "efiapi" fn(),
 
     /// Uses a set of precedence rules to find the best set of drivers to manage
     /// a controller.
-    pub connect_controller: extern "efiapi" fn(),
+    pub connect_controller: unsafe extern "efiapi" fn(),
     /// Informs a set of drivers to stop managing a controller.
-    pub disconnect_controller: extern "efiapi" fn(),
+    pub disconnect_controller: unsafe extern "efiapi" fn(),
 
     /// Adds elements to a list of agents consuming a protocol interface.
-    pub open_protocol: extern "efiapi" fn(),
+    pub open_protocol: unsafe extern "efiapi" fn(),
     /// Removes elements from the list of agents consuming a protocol interface.
-    pub close_protocol: extern "efiapi" fn(),
+    pub close_protocol: unsafe extern "efiapi" fn(),
     /// Retrieves the list of agents that are currently consuming a protocol interface.
-    pub open_protocol_information: extern "efiapi" fn(),
+    pub open_protocol_information: unsafe extern "efiapi" fn(),
 
     /// Retrieves the list of protocols installed on a handle. The return buffer is
     /// allocated automatically.
-    pub protocols_per_handle: extern "efiapi" fn(),
+    pub protocols_per_handle: unsafe extern "efiapi" fn(),
     /// Retrieves the list of handles from the handle database that meet the search
     /// criteria. The return buffer is allocated automatically.
-    pub locate_handle_buffer: extern "efiapi" fn(),
+    pub locate_handle_buffer: unsafe extern "efiapi" fn(),
     /// Finds the first handle in the handle database that supports the requested protocol.
-    pub locate_protocol: extern "efiapi" fn(),
+    pub locate_protocol: unsafe extern "efiapi" fn(),
     /// Installs one or more protocol interfaces onto a handle.
-    pub install_multiple_protocol_interface: extern "efiapi" fn(),
+    pub install_multiple_protocol_interface: unsafe extern "efiapi" fn(),
     /// Removes one or more protocol interfaces from a handle.
-    pub uninstall_multiple_protocol_interface: extern "efiapi" fn(),
+    pub uninstall_multiple_protocol_interface: unsafe extern "efiapi" fn(),
 
     /// Computes and returns a 32-bit CRC for a data buffer.
-    pub calculate_crc32: extern "efiapi" fn(),
+    pub calculate_crc32: unsafe extern "efiapi" fn(),
 
     /// Copies the contents of one buffer to another buffer.
-    pub copy_mem: extern "efiapi" fn(),
+    pub copy_mem: unsafe extern "efiapi" fn(),
     /// Fills a buffer with a specified value.
-    pub set_mem: extern "efiapi" fn(),
+    pub set_mem: unsafe extern "efiapi" fn(),
     /// Creates an event structure as part of an event group.
-    pub create_event_ex: extern "efiapi" fn(),
+    pub create_event_ex: unsafe extern "efiapi" fn(),
 }
 
 impl RawBootServicesTable {

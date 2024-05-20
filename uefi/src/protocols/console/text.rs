@@ -2,7 +2,7 @@
 
 use core::mem::MaybeUninit;
 
-use crate::datatypes::{Char16, Status};
+use crate::datatypes::{Char16, Guid, Status};
 
 /// A protocol used to control text-based devices.
 ///
@@ -47,6 +47,16 @@ pub struct SimpleTextOutputProtocol {
     pub enable_cursor: unsafe extern "efiapi" fn(this: *mut Self, visible: bool) -> Status,
     /// Pointer to the [`SimpleTextOutputMode`] describing the current state of this [`SimpleTextOutputProtocol`].
     pub mode: *mut SimpleTextOutputMode,
+}
+
+impl SimpleTextOutputProtocol {
+    /// The [`Guid`] associated with the [`SimpleTextOutputProtocol`].
+    pub const GUID: Guid = Guid {
+        data1: 0x387477C2,
+        data2: 0x69C7,
+        data3: 0x11D2,
+        data4: [0x8E, 0x39, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B],
+    };
 }
 
 /// Basic values corresponding to an associated [`SimpleTextOutputProtocol`] that users may utilize.

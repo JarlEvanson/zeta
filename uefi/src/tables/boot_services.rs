@@ -1,6 +1,9 @@
 //! Definitions and interfaces for interacting with the UEFI boot services table.
 
-use crate::tables::{Header, TableHeaderValidationError};
+use crate::{
+    datatypes::Status,
+    tables::{Header, TableHeaderValidationError},
+};
 
 /// A container for function pointers to interact with the UEFI environment.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -75,7 +78,7 @@ pub struct RawBootServicesTable {
     /// Returns a monotonically increasing count for the platform.
     pub get_next_monotonic_count: unsafe extern "efiapi" fn(),
     /// Stalls the processor.
-    pub stall: unsafe extern "efiapi" fn(),
+    pub stall: unsafe extern "efiapi" fn(microseconds: usize) -> Status,
     /// Resets and sets the watchdog timer used during boot services.
     pub set_watchdog_timer: unsafe extern "efiapi" fn(),
 

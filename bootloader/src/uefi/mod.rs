@@ -10,6 +10,7 @@ pub use uefi::{
     tables::system::RawSystemTable,
 };
 
+pub mod protocols;
 pub mod tables;
 
 /// The private access to the system table used for destructors.

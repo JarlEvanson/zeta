@@ -70,11 +70,112 @@ pub struct SimpleTextOutputMode {
     /// The text mode of the device associated with the [`SimpleTextOutputProtocol`].
     pub mode: i32,
     /// The current character output attribute.
-    pub attributes: i32,
+    pub attributes: ColorAttribute,
     /// The cursor's column.
     pub cursor_column: i32,
     /// The cursor's row.
     pub cursor_row: i32,
     /// Whether the cursor is currently visible.
     pub cursor_visible: bool,
+}
+
+/// Color settings of the [`SimpleTextOutputProtocol`].
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct ColorAttribute(i32);
+
+impl ColorAttribute {
+    /// Extracts the [`ForegroundColor`] from the [`ColorAttribute`].
+    pub const fn foreground(self) -> ForegroundColor {
+        match self.0 & 0xF {
+            0 => ForegroundColor::Black,
+            1 => ForegroundColor::Blue,
+            2 => ForegroundColor::Green,
+            3 => ForegroundColor::Cyan,
+            4 => ForegroundColor::Red,
+            5 => ForegroundColor::Magenta,
+            6 => ForegroundColor::Brown,
+            7 => ForegroundColor::LightGray,
+            8 => ForegroundColor::Bright,
+            9 => ForegroundColor::DarkGray,
+            10 => ForegroundColor::LightBlue,
+            11 => ForegroundColor::LightGreen,
+            12 => ForegroundColor::LightCyan,
+            13 => ForegroundColor::LightRed,
+            14 => ForegroundColor::LightMagenta,
+            15 => ForegroundColor::White,
+            _ => unreachable!(),
+        }
+    }
+
+    /// Extracts the [`BackgroundColor`] from the [`ColorAttribute`].
+    pub const fn backround(self) -> BackgroundColor {
+        match (self.0 >> 4) & 0x7 {
+            0 => BackgroundColor::Black,
+            1 => BackgroundColor::Blue,
+            2 => BackgroundColor::Green,
+            3 => BackgroundColor::Cyan,
+            4 => BackgroundColor::Red,
+            5 => BackgroundColor::Magenta,
+            6 => BackgroundColor::Brown,
+            7 => BackgroundColor::LightGray,
+            _ => unreachable!(),
+        }
+    }
+}
+
+/// Foreground colors that [`SimpleTextOutputProtocol`] can be set to produce.
+pub enum ForegroundColor {
+    /// Black
+    Black,
+    /// Blue
+    Blue,
+    /// Green
+    Green,
+    /// Cyan
+    Cyan,
+    /// Red
+    Red,
+    /// Magenta
+    Magenta,
+    /// Brown
+    Brown,
+    /// Light Gray
+    LightGray,
+    /// Bright
+    Bright,
+    /// Dark Gray
+    DarkGray,
+    /// Light Blue
+    LightBlue,
+    /// Light Green
+    LightGreen,
+    /// Light Cyan
+    LightCyan,
+    /// Light Red
+    LightRed,
+    /// Light Magenta
+    LightMagenta,
+    /// White
+    White,
+}
+
+/// Background colors that [`SimpleTextOutputProtocol`] can be set to produce.
+pub enum BackgroundColor {
+    /// Black
+    Black,
+    /// Blue
+    Blue,
+    /// Green
+    Green,
+    /// Cyan
+    Cyan,
+    /// Red
+    Red,
+    /// Magenta
+    Magenta,
+    /// Brown
+    Brown,
+    /// Light Gray
+    LightGray,
 }

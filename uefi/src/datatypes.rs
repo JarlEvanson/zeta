@@ -1,9 +1,28 @@
 //! Definitions and helper functions for UEFI datatypes.
 
-/// A collection of related interfaces provided by UEFI firmware.
+use core::ptr::NonNull;
+
+/// A nullable collection of related interfaces provided by UEFI firmware.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(transparent)]
 pub struct RawHandle(pub *mut core::ffi::c_void);
+
+/// A collection of related interfaces provided by UEFI firmware.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct Handle(NonNull<core::ffi::c_void>);
+
+impl Handle {
+    /// Creates a new [`Handle`], returning [`None`] if `raw` is null.
+    pub fn new(raw: RawHandle) -> Option<Handle> {
+        NonNull::new(raw.0).map(Handle)
+    }
+
+    /// Gets the underlying [`RawHandle`].
+    pub fn as_raw(self) -> RawHandle {
+        RawHandle(self.0.as_ptr())
+    }
+}
 
 /// A status code returned by UEFI functions.
 #[must_use]

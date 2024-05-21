@@ -136,6 +136,16 @@ impl Status {
     pub const fn oem(self) -> bool {
         self.0 & Status::OEM_BIT == Status::OEM_BIT
     }
+
+    /// Returns [`Ok`] if `self` is [`Status::SUCCESS`], otherwise returns [`Err`].
+    #[allow(clippy::missing_errors_doc)]
+    pub fn into_result(self) -> Result<(), Status> {
+        if self == Status::SUCCESS {
+            Ok(())
+        } else {
+            Err(self)
+        }
+    }
 }
 
 /// A unicode codepoint in UCS-2 encoding.

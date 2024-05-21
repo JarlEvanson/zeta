@@ -3,7 +3,7 @@
 use core::{mem::MaybeUninit, ptr::NonNull};
 
 use uefi::{
-    datatypes::{CStr16, Status},
+    datatypes::{CStr16, Char16, Status},
     protocols::console::text::{
         BackgroundColor, ForegroundColor, SimpleTextOutputMode, SimpleTextOutputProtocol,
     },
@@ -114,6 +114,48 @@ impl SimpleTextOutput {
         // SAFETY:
         // All [`SimpleTextOutput`] structures point to a valid [`SimpleTextOutputProtocol`].
         unsafe { &*mode_ptr }
+    }
+}
+
+impl core::fmt::Write for SimpleTextOutput {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        /// [`Char16`] that represents invalid or unformatted characters.
+        const REPLACEMENT_CHAR: Char16 = if let Some(c) = Char16::new('\u{FFFD}') {
+            c
+        } else {
+            unreachable!()
+        };
+
+        let mut buffer = [Char16::NUL; 100];
+
+        let mut index = 0;
+
+        for c in s.chars() {
+            buffer[index] = Char16::new(c).unwrap_or(REPLACEMENT_CHAR);
+            index += 1;
+
+            // Need to keep the last [`Char::NUL`].
+            if index == buffer.len() - 1 {
+                let result = self.output_string(CStr16::from_slice(&buffer));
+                index = 0;
+
+                if let Err(err) = result {
+                    if err.error() {
+                        return Err(core::fmt::Error);
+                    }
+                }
+            }
+        }
+
+        buffer[index] = Char16::NUL;
+
+        if let Err(err) = self.output_string(CStr16::from_slice(&buffer[..=index])) {
+            if err.error() {
+                return Err(core::fmt::Error);
+            }
+        }
+
+        Ok(())
     }
 }
 

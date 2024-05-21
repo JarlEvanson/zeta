@@ -6,7 +6,7 @@ use core::{
 };
 
 pub use uefi::{
-    datatypes::{RawHandle, Status},
+    datatypes::{Handle, RawHandle, Status},
     tables::system::RawSystemTable,
 };
 
@@ -42,10 +42,10 @@ macro_rules! entry_point {
         #[doc(hidden)]
         #[export_name = "efi_main"]
         pub unsafe extern "efiapi" fn __efi_main(
-            handle: $crate::uefi::RawHandle,
+            raw_handle: $crate::uefi::RawHandle,
             system_table: *mut $crate::uefi::RawSystemTable,
         ) -> $crate::uefi::Status {
-            const ENTRY_POINT: fn($crate::uefi::tables::system::SystemTable<$crate::uefi::tables::system::Boot>) -> $crate::uefi::Status = $path;
+            const ENTRY_POINT: fn($crate::uefi::Handle, $crate::uefi::tables::system::SystemTable<$crate::uefi::tables::system::Boot>) -> $crate::uefi::Status = $path;
 
             let Some(system_table_ptr) = core::ptr::NonNull::new(system_table) else {
                 return $crate::uefi::Status::INVALID_PARAMETER;
@@ -61,16 +61,20 @@ macro_rules! entry_point {
                     },
                 };
 
+            let Some(handle) = $crate::uefi::Handle::new(raw_handle) else {
+                return $crate::uefi::Status::INVALID_PARAMETER;
+            };
+
             // SAFETY:
             // `system_table` has been validated as much as it can be,
             // and was provided to the executable as the executable's [`RawSystemTable`].
             unsafe { $crate::uefi::set_system_table(system_table_ptr.as_ptr()) };
 
             // SAFETY:
-            // `handle` was provided to `efi_main` as the executable's handle.
-            unsafe { $crate::uefi::set_image_handle(handle) };
+            // `raw_handle` was provided to `efi_main` as the executable's handle.
+            unsafe { $crate::uefi::set_image_handle(raw_handle) };
 
-            ENTRY_POINT(system_table)
+            ENTRY_POINT(handle, system_table)
         }
     };
 }

@@ -3,7 +3,10 @@
 #![no_std]
 #![no_main]
 
-use crate::uefi::tables::system::{Boot, SystemTable};
+use crate::uefi::{
+    tables::system::{Boot, SystemTable},
+    Handle,
+};
 use ::uefi::{
     datatypes::Status,
     protocols::console::text::{BackgroundColor, ForegroundColor},
@@ -14,7 +17,7 @@ mod uefi;
 entry_point!(entry_point);
 
 /// The main logic for the bootloader.
-fn entry_point(mut system_table: SystemTable<Boot>) -> Status {
+fn entry_point(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     setup_outputs(&mut system_table);
 
     system_table.boot_services().stall(10_000_000);
@@ -24,6 +27,8 @@ fn entry_point(mut system_table: SystemTable<Boot>) -> Status {
 
 /// Sets up console out and console err for the executable.
 fn setup_outputs(system_table: &mut SystemTable<Boot>) {
+    // Ignore errors on non-essential functions, since we can't respond to them anyway.
+
     let mut console_out = system_table.console_out();
 
     let max_mode = console_out.info().max_mode as usize;
@@ -75,6 +80,11 @@ fn setup_outputs(system_table: &mut SystemTable<Boot>) {
     let _ = console_err.set_attribute(BackgroundColor::Black, ForegroundColor::Red);
     let _ = console_err.set_mode(best_mode);
     let _ = console_err.enable_cursor(false);
+}
+
+/// Acquires the handle that represents the boot partition from which this bootloader was loaded.
+fn acquire_boot_directory(image_handle: Handle, mut system_table: SystemTable<Boot>) {
+    todo!()
 }
 
 /// Handles panics occurring while booting the system.

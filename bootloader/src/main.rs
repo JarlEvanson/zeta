@@ -46,9 +46,9 @@ fn setup_outputs(system_table: &mut SystemTable<Boot>) {
         }
     }
 
+    let _ = console_out.set_attribute(BackgroundColor::Black, ForegroundColor::Green);
     let _ = console_out.set_mode(best_mode);
     let _ = console_out.enable_cursor(false);
-    let _ = console_out.set_attribute(BackgroundColor::Black, ForegroundColor::Green);
 
     let mut console_err = system_table.console_err();
 
@@ -72,9 +72,9 @@ fn setup_outputs(system_table: &mut SystemTable<Boot>) {
         }
     }
 
+    let _ = console_err.set_attribute(BackgroundColor::Black, ForegroundColor::Red);
     let _ = console_err.set_mode(best_mode);
     let _ = console_err.enable_cursor(false);
-    let _ = console_err.set_attribute(BackgroundColor::Black, ForegroundColor::Red);
 }
 
 /// Handles panics occurring while booting the system.

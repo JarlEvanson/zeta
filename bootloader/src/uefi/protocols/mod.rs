@@ -2,6 +2,8 @@
 
 use uefi::datatypes::Guid;
 
+pub mod console;
+
 /// A UEFI protocol.
 pub trait Protocol {
     /// The [`Protocol`]'s globally unique ID ([`Guid`]).

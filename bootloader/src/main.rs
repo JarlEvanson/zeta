@@ -20,6 +20,8 @@ entry_point!(entry_point);
 fn entry_point(image_handle: Handle, mut system_table: SystemTable<Boot>) -> Status {
     setup_outputs(&mut system_table);
 
+    acquire_boot_directory(image_handle, &mut system_table);
+
     system_table.boot_services().stall(10_000_000);
 
     Status::SUCCESS
@@ -83,7 +85,7 @@ fn setup_outputs(system_table: &mut SystemTable<Boot>) {
 }
 
 /// Acquires the handle that represents the boot partition from which this bootloader was loaded.
-fn acquire_boot_directory(image_handle: Handle, mut system_table: SystemTable<Boot>) {
+fn acquire_boot_directory(image_handle: Handle, mut system_table: &mut SystemTable<Boot>) {
     todo!()
 }
 

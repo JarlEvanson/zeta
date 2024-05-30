@@ -1,7 +1,7 @@
 //! Definitions and interfaces for interacting with the UEFI boot services table.
 
 use crate::{
-    datatypes::Status,
+    datatypes::{Guid, Handle, Status},
     tables::{Header, TableHeaderValidationError},
 };
 
@@ -89,7 +89,13 @@ pub struct RawBootServicesTable {
     pub disconnect_controller: unsafe extern "efiapi" fn(),
 
     /// Adds elements to a list of agents consuming a protocol interface.
-    pub open_protocol: unsafe extern "efiapi" fn(),
+    pub open_protocol: unsafe extern "efiapi" fn(
+        Handle,
+        protocol: *mut Guid,
+        interface: *mut *mut core::ffi::c_void,
+        agent: Handle,
+        controller: Option<Handle>,
+    ),
     /// Removes elements from the list of agents consuming a protocol interface.
     pub close_protocol: unsafe extern "efiapi" fn(),
     /// Retrieves the list of agents that are currently consuming a protocol interface.
